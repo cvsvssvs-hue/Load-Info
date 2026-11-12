@@ -1,0 +1,860 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Учёт рейсов</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+  (function () {
+    var t = window.Telegram && Telegram.WebApp;
+    var dark = (t && t.initData) ? t.colorScheme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<style>
+*{box-sizing:border-box}
+:root{
+  --bg:#edf1ee; --surface:#ffffff; --surface2:#f2f5f3;
+  --ink:#16201a; --muted:#68746c; --line:#e1e7e3;
+  --sign:#0b6b45; --sign-soft:#e1f0e7;
+  --pos:#0b7a4b; --neg:#c8382f; --warn:#9a6400; --warn-bg:#fcf1d8;
+  --rev:#a8d5bd;
+  --shadow:0 1px 2px rgba(16,40,26,.06),0 3px 10px rgba(16,40,26,.05);
+  --font:"Overpass",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  color-scheme:light;
+}
+:root[data-theme="dark"]{
+  --bg:#0c120f; --surface:#151d19; --surface2:#1c2621;
+  --ink:#e8eee9; --muted:#8b988f; --line:#25302a;
+  --sign:#136f47; --sign-soft:#15291f;
+  --pos:#46d08f; --neg:#ff6d60; --warn:#e8ae2e; --warn-bg:#2a2314;
+  --rev:#2d5d46;
+  --shadow:none;
+  color-scheme:dark;
+}
+html{-webkit-text-size-adjust:100%;background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 var(--font);
+  padding-top:env(safe-area-inset-top,0px);-webkit-font-smoothing:antialiased}
+b,.num,input{font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--pos);outline-offset:2px}
+
+/* шапка */
+.top{max-width:640px;margin:0 auto;padding:18px 18px 4px}
+.top h1{margin:0;font-size:28px;line-height:1.15;font-weight:800;letter-spacing:-.02em}
+.top p{margin:3px 0 0;color:var(--muted);font-size:15px;min-height:1.2em}
+main{max-width:640px;margin:0 auto;padding:12px 14px calc(110px + env(safe-area-inset-bottom,0px))}
+
+/* дорожный знак: итог периода */
+.sign{background:var(--sign);color:#fff;border-radius:20px;padding:5px;box-shadow:var(--shadow)}
+.sign-in{border:2px solid rgba(255,255,255,.9);border-radius:16px;padding:14px 16px 13px}
+.sign-label{font-size:14px;font-weight:600;opacity:.88;display:flex;align-items:center;gap:8px}
+.sign-num{font-size:46px;line-height:1.05;font-weight:800;letter-spacing:-.02em;margin-top:6px}
+.loss{background:#fff;color:#c8382f;font-size:12px;font-weight:700;border-radius:999px;padding:2px 8px 1px}
+.sign-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px 8px;margin-top:14px;padding-top:13px;border-top:1px solid rgba(255,255,255,.3)}
+.sign-kpis small{display:block;font-size:12px;opacity:.78}
+.sign-kpis b{font-size:17px;font-weight:700}
+.sign-note{font-size:12px;opacity:.78;margin-top:11px}
+
+/* заголовки секций */
+.sec{display:flex;justify-content:space-between;align-items:baseline;font-size:15px;font-weight:700;color:var(--muted);margin:24px 4px 9px}
+.sec small{font-weight:600;font-size:13px}
+
+/* карточка рейса */
+.list{display:flex;flex-direction:column;gap:9px}
+.trip{display:grid;grid-template-columns:46px 1fr;gap:12px;background:var(--surface);border-radius:16px;
+  padding:12px 13px 11px 12px;box-shadow:var(--shadow);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.trip:active{background:var(--surface2)}
+.trip-date{background:var(--surface2);border-radius:11px;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.trip-date b{font-size:20px;font-weight:800;line-height:1}
+.trip-date span{font-size:11px;font-weight:600;color:var(--muted);margin-top:4px}
+.trip-main{min-width:0}
+.route{display:flex;align-items:center;gap:9px;font-size:16px;font-weight:700}
+.city{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.road{flex:1 1 20px;min-width:20px;height:2px;position:relative;
+  background:repeating-linear-gradient(90deg,var(--muted) 0 5px,transparent 5px 9px);opacity:.9}
+.road::before,.road::after{content:"";position:absolute;top:50%;width:8px;height:8px;border-radius:50%;transform:translateY(-50%)}
+.road::before{left:-2px;border:2px solid var(--pos);background:var(--surface);box-sizing:border-box}
+.road::after{right:-2px;background:var(--pos)}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:5px;font-size:13px;color:var(--muted)}
+.chip{background:var(--surface2);color:var(--ink);border-radius:6px;padding:2px 7px 1px;font-size:12px;font-weight:600}
+.trip-nums{display:grid;grid-template-columns:1.15fr .9fr .9fr 1.1fr;gap:4px;margin-top:10px;padding-top:9px;border-top:1px solid var(--line)}
+.trip-nums small{display:block;font-size:11px;color:var(--muted)}
+.trip-nums b{font-size:15px;font-weight:700}
+.trip-nums > div:last-child{text-align:right}
+.trip-nums em{display:block;font-style:normal;font-size:11px;color:var(--muted);margin-top:1px;white-space:nowrap}
+.pos{color:var(--pos)} .neg{color:var(--neg)}
+
+/* кнопки */
+.btn{display:block;width:100%;border:0;border-radius:15px;background:var(--sign);color:#fff;font-size:17px;font-weight:700;
+  padding:16px;margin-top:14px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.btn:active{filter:brightness(.92)}
+.btn.secondary{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.btn.danger{background:var(--surface);color:var(--neg);box-shadow:var(--shadow)}
+.btn.small{display:inline-block;width:auto;margin:0;padding:9px 14px;font-size:14px;border-radius:11px;white-space:nowrap}
+.btn:disabled{opacity:.55}
+
+.notice{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--warn-bg);color:var(--ink);
+  border-radius:14px;padding:11px 12px 11px 14px;margin-bottom:10px;font-size:14px}
+.notice b{color:var(--warn)}
+
+/* форма */
+.card{background:var(--surface);border-radius:18px;padding:14px;box-shadow:var(--shadow)}
+.field{display:block;min-width:0}
+.field + .field,.row2 + .field,.field + .row2{margin-top:12px}
+.field > span{display:block;font-size:13px;font-weight:600;color:var(--muted);margin:0 2px 6px}
+.input{display:block;width:100%;min-width:0;min-height:48px;background:var(--surface2);border:1.5px solid transparent;border-radius:12px;
+  color:var(--ink);font:inherit;font-size:17px;padding:11px 12px 9px;outline:none;-webkit-appearance:none;appearance:none}
+.input:focus{border-color:var(--pos);background:var(--surface)}
+.input::placeholder{color:var(--muted);opacity:.55}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.row2 > .field{margin-top:0}
+.date-row{display:flex;gap:8px;align-items:center}
+.date-row .input{flex:1}
+.pill{border:0;background:var(--surface2);border-radius:999px;padding:12px 13px 10px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap}
+.pill.on{background:var(--sign-soft);color:var(--pos)}
+.route-edit{display:grid;grid-template-columns:1fr 44px;gap:10px;align-items:center}
+.swap{width:44px;height:44px;margin-top:22px;border:0;border-radius:12px;background:var(--surface2);color:var(--pos);display:grid;place-items:center;cursor:pointer}
+.swap svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.result{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--sign-soft);border-radius:18px;padding:14px 16px;margin-top:12px}
+.result small{display:block;font-size:12px;font-weight:600;color:var(--muted)}
+.result b{font-size:21px;font-weight:800}
+.result > div:nth-child(3){text-align:right}
+.breakdown{grid-column:1/-1;font-size:12px;color:var(--muted);margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
+details.card{padding:0;margin-top:12px}
+details summary{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:15px 14px 14px;font-weight:700;cursor:pointer;list-style:none}
+details summary::-webkit-details-marker{display:none}
+details summary small{font-weight:600;color:var(--muted);font-size:13px;margin-left:auto}
+details summary::after{content:"";width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg) translateY(-2px);transition:transform .15s}
+details[open] summary::after{transform:rotate(-135deg) translateY(-2px)}
+details .inner{padding:0 14px 14px}
+
+/* история */
+.month{font-size:15px;font-weight:700;color:var(--muted);margin:22px 4px 9px}
+.month:first-child{margin-top:4px}
+.wk{background:var(--surface);border-radius:18px;box-shadow:var(--shadow);margin-bottom:9px;overflow:hidden}
+.wk-head{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:13px 14px 13px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.wk-title{font-size:16px;font-weight:700}
+.wk-profit{text-align:right;font-size:18px;font-weight:800}
+.wk-sub{display:flex;flex-wrap:wrap;gap:2px 10px;font-size:13px;color:var(--muted)}
+.status{text-align:right;font-size:12px;font-weight:700;color:var(--muted)}
+.status.warn{color:var(--warn)} .status.cur{color:var(--pos)}
+.meter{grid-column:1/-1;height:4px;border-radius:2px;background:var(--surface2);margin-top:9px;overflow:hidden}
+.meter i{display:block;height:100%;border-radius:2px;background:var(--pos)}
+.meter i.neg{background:var(--neg)}
+.wk-body{padding:12px 10px;border-top:1px solid var(--line)}
+.wk-body .trip{background:var(--surface2);box-shadow:none}
+.wk-body .trip-date,.wk-body .chip{background:var(--surface)}
+.wk-body .btn{margin-top:10px}
+
+/* дашборд */
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--surface);border-radius:15px;padding:4px;margin-bottom:12px;box-shadow:var(--shadow)}
+.seg button{border:0;background:none;color:var(--muted);font-weight:700;padding:10px 8px 8px;border-radius:11px;cursor:pointer}
+.seg button.on{background:var(--sign);color:#fff}
+.chart-card{margin-top:12px}
+.chart-card h3{margin:0;font-size:16px;font-weight:700}
+.chart-card .hint{margin:2px 0 0}
+.chart{position:relative;height:220px;margin-top:12px}
+
+/* настройки */
+.set-row{display:grid;grid-template-columns:1fr 108px;gap:14px;align-items:center;padding:13px 0;border-bottom:1px solid var(--line)}
+.set-row:last-child{border-bottom:0}
+.set-row span{font-size:15px;font-weight:600}
+.set-row small{display:block;font-size:12px;color:var(--muted);margin-top:2px;font-weight:400}
+.set-row .input{text-align:right;min-height:42px;padding:9px 11px 7px;font-size:16px}
+.card.rows{padding:0 14px}
+.status-line{display:flex;align-items:center;gap:8px;font-weight:700}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--warn)}
+.dot.on{background:var(--pos)}
+
+.empty{text-align:center;color:var(--muted);padding:34px 20px 12px}
+.empty svg{width:56px;height:56px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;opacity:.7}
+.empty p{margin:10px 0 0}
+.empty .btn{max-width:260px;margin:18px auto 0}
+.hint{color:var(--muted);font-size:13px;line-height:1.45;margin:10px 4px}
+.center{text-align:center}
+
+/* нижнее меню */
+.tabs{position:fixed;left:0;right:0;bottom:0;z-index:5;background:var(--surface);border-top:1px solid var(--line);
+  padding:6px 6px calc(8px + env(safe-area-inset-bottom,0px))}
+.tabs-in{max-width:640px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr)}
+.tab{border:0;background:none;color:var(--muted);font-size:11px;font-weight:700;display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:4px 0 0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.tab svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.tab.on{color:var(--pos)}
+.tab.add .plus{width:52px;height:52px;border-radius:17px;background:var(--sign);color:#fff;display:grid;place-items:center;margin-top:-24px;
+  box-shadow:0 0 0 5px var(--surface),0 8px 18px rgba(11,107,69,.35)}
+.tab.add .plus svg{width:26px;height:26px;stroke-width:2.4}
+
+#toast{position:fixed;left:50%;bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:9;max-width:88vw;
+  transform:translate(-50%,14px);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
+  background:var(--ink);color:var(--surface);padding:11px 18px 9px;border-radius:14px;font-size:14px;font-weight:600;text-align:center}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+#toast.err{background:var(--neg);color:#fff}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (max-width:360px){.sign-num{font-size:40px}.trip-nums b{font-size:14px}}
+</style>
+</head>
+<body>
+<header class="top"><h1 id="title">Учёт рейсов</h1><p id="subtitle"></p></header>
+<main id="main"></main>
+
+<nav class="tabs"><div class="tabs-in" id="tabs">
+  <button class="tab" data-view="week"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>Неделя</span></button>
+  <button class="tab" data-view="history"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>История</span></button>
+  <button class="tab add" data-view="add" aria-label="Добавить рейс"><span class="plus"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span></button>
+  <button class="tab" data-view="dash"><svg viewBox="0 0 24 24"><path d="M5 20v-7M12 20V5M19 20v-10"/></svg><span>Дашборд</span></button>
+  <button class="tab" data-view="settings"><svg viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg><span>Настройки</span></button>
+</div></nav>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ================== НАСТРОЙКА ==================
+   Вставьте сюда URL веб-приложения Google Apps Script.
+   Пока строка пустая, приложение работает в демо-режиме
+   и хранит данные только на этом устройстве. */
+const CONFIG = { API_URL: '' };
+/* ================================================ */
+
+const tg = window.Telegram && window.Telegram.WebApp;
+const IN_TG = !!(tg && tg.initData);
+const DEMO = !CONFIG.API_URL;
+const main = document.getElementById('https://script.google.com/macros/s/AKfycbzqAC_vh4Pp2V-3ynRDBw6W_4s9UcqzTVvHLXukDnzuZWA3Mp1KQVHIbakdqW3pJlI8/exec');
+
+const SETTINGS_META = [
+  ['driverPerMile',      'Водитель, гружёная миля', 0.70, '$ за каждую гружёную милю'],
+  ['driverPerEmptyMile', 'Водитель, пустая миля', 0.70, '$ за милю до загрузки; 0, если не платите'],
+  ['driverPercent',      'Водитель, % от ставки', 0, 'Если водитель получает процент'],
+  ['dispatchPercent',    'Диспетчер, %', 0, 'Процент от ставки'],
+  ['factoringPercent',   'Факторинг, %', 3, 'Процент от ставки'],
+  ['fuelPerMile',        'Топливо гружёный, $/миля', 0.65, 'Цена галлона ÷ MPG гружёным, напр. 3.90 ÷ 6'],
+  ['fuelPerEmptyMile',   'Топливо пустой, $/миля', 0.53, 'Цена галлона ÷ MPG пустым, напр. 3.90 ÷ 7.4'],
+  ['fixedWeekly',        'Постоянные, $ в неделю', 0, 'Страховка, лизинг, ELD и т. п.'],
+];
+
+const ICON_TRUCK = '<svg viewBox="0 0 48 48"><path d="M4 31V14a2 2 0 0 1 2-2h21a2 2 0 0 1 2 2v17"/><path d="M29 18h7.5l6.5 7.5V31a2 2 0 0 1-2 2h-1.5"/><path d="M4 31v0a2 2 0 0 0 2 2h1.5M18 33h11.5"/><circle cx="13" cy="33.5" r="4"/><circle cx="35" cy="33.5" r="4"/></svg>';
+const ICON_SWAP = '<svg viewBox="0 0 24 24"><path d="M8 4v16M8 4 4.5 7.5M8 4l3.5 3.5M16 20V4M16 20l-3.5-3.5M16 20l3.5-3.5"/></svg>';
+
+const state = {
+  trips: [], weeks: [], settings: defaultSettings(),
+  view: 'week', editId: null, draft: null, dashPeriod: 'week', openWeek: null,
+  loaded: false, error: null
+};
+let charts = [];
+
+/* ---------- даты ---------- */
+const pad = n => String(n).padStart(2, '0');
+const MG = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+const MN = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const MS = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+const DOW = ['вс','пн','вт','ср','чт','пт','сб'];
+function toISO(d){ return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate()); }
+function parseISO(s){ const [y,m,d] = s.split('-').map(Number); return new Date(Date.UTC(y, m-1, d)); }
+function addDays(s, n){ const d = parseISO(s); d.setUTCDate(d.getUTCDate()+n); return toISO(d); }
+function weekKey(s){ const d = parseISO(s); d.setUTCDate(d.getUTCDate() - (d.getUTCDay()+6)%7); return toISO(d); }
+function todayISO(){ const d = new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+function curWeek(){ return weekKey(todayISO()); }
+function weekLabel(w){
+  const a = parseISO(w), b = parseISO(addDays(w, 6));
+  const yr = b.getUTCFullYear() !== new Date().getFullYear() ? ' ' + b.getUTCFullYear() : '';
+  if (a.getUTCMonth() === b.getUTCMonth()) return `${a.getUTCDate()}–${b.getUTCDate()} ${MG[b.getUTCMonth()]}${yr}`;
+  return `${a.getUTCDate()} ${MG[a.getUTCMonth()]} – ${b.getUTCDate()} ${MG[b.getUTCMonth()]}${yr}`;
+}
+
+/* ---------- числа ---------- */
+const fmt0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+function money(v){ v = +v || 0; return (v < 0 ? '−$' : '$') + fmt0.format(Math.abs(Math.round(v))); }
+function moneyShort(v){ v = +v || 0; const a = Math.abs(v), s = v < 0 ? '−$' : '$';
+  return a >= 1000 ? s + (a/1000).toFixed(a >= 10000 ? 0 : 1) + 'k' : s + Math.round(a); }
+function rpmFmt(v){ return '$' + (+v || 0).toFixed(2); }
+function num(v){ return fmt0.format(+v || 0); }
+function round2(x){ return Math.round((+x || 0) * 100) / 100; }
+function sum(arr, k){ return arr.reduce((a, t) => a + (+t[k] || 0), 0); }
+function parseNum(v){
+  let s = String(v == null ? '' : v).trim().replace(/\s/g, '').replace(/\$/g, '');
+  if (s.includes(',') && s.includes('.')) s = s.replace(/,/g, '');
+  else if (/,\d{3}$/.test(s)) s = s.replace(/,/g, '');
+  else s = s.replace(',', '.');
+  const x = parseFloat(s); return isFinite(x) ? x : 0;
+}
+function plural(n, f){ const a = n % 100, b = n % 10;
+  return f[(a > 10 && a < 20) ? 2 : b === 1 ? 0 : (b >= 2 && b <= 4) ? 1 : 2]; }
+const TRIPS_WORD = ['рейс','рейса','рейсов'];
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ---------- расчёты (те же формулы, что в Apps Script) ---------- */
+function defaultSettings(){ const s = {}; SETTINGS_META.forEach(m => s[m[0]] = m[2]); return s; }
+/* miles — гружёные мили, deadhead — пустые мили до загрузки.
+   Топливо считается отдельно для гружёного и пустого хода.
+   Если фактическая сумма топлива введена, она делится между ними пропорционально расчёту. */
+function calcParts(t, s){
+  const loaded = +t.miles || 0, empty = +t.deadhead || 0, rate = +t.rate || 0;
+  const estLoaded = loaded * (+s.fuelPerMile || 0), estEmpty = empty * (+s.fuelPerEmptyMile || 0);
+  let fuelLoaded = estLoaded, fuelEmpty = estEmpty;
+  if (+t.fuel > 0) {
+    const est = estLoaded + estEmpty;
+    fuelEmpty = est > 0 ? +t.fuel * estEmpty / est : 0;
+    fuelLoaded = +t.fuel - fuelEmpty;
+  }
+  return {
+    driver:     loaded * (+s.driverPerMile || 0) + empty * (+s.driverPerEmptyMile || 0) + rate * (+s.driverPercent || 0) / 100,
+    fuelLoaded, fuelEmpty,
+    dispatch:   rate * (+s.dispatchPercent || 0) / 100,
+    factoring:  rate * (+s.factoringPercent || 0) / 100,
+    tolls:      +t.tolls || 0,
+    other:      +t.other || 0
+  };
+}
+function calcTrip(t, s){
+  const p = calcParts(t, s), loaded = +t.miles || 0, total = loaded + (+t.deadhead || 0), rate = +t.rate || 0;
+  const exp = Object.values(p).reduce((a, b) => a + b, 0);
+  return { totalMiles: total, rpm: loaded ? round2(rate / loaded) : 0, rpmTotal: total ? round2(rate / total) : 0,
+    fuelLoaded: round2(p.fuelLoaded), fuelEmpty: round2(p.fuelEmpty), expenses: round2(exp), profit: round2(rate - exp) };
+}
+function prepTrip(p, s){
+  const str = v => String(v == null ? '' : v).trim();
+  const t = { id: p.id ? String(p.id) : '', date: str(p.date).slice(0, 10),
+    from: str(p.from), to: str(p.to), customer: str(p.customer), truck: str(p.truck), cargo: str(p.cargo),
+    miles: parseNum(p.miles), deadhead: parseNum(p.deadhead), rate: parseNum(p.rate),
+    fuel: parseNum(p.fuel), tolls: parseNum(p.tolls), other: parseNum(p.other) };
+  t.week = /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? weekKey(t.date) : '';
+  return Object.assign(t, calcTrip(t, s));
+}
+function weekSummary(trips, week, fixed){
+  const ts = trips.filter(t => t.week === week);
+  const rev = sum(ts, 'rate'), exp = sum(ts, 'expenses'), miles = sum(ts, 'miles'), dh = sum(ts, 'deadhead');
+  fixed = ts.length ? (+fixed || 0) : 0;
+  return { week, trips: ts.length, miles, deadhead: dh, revenue: round2(rev), tripExpenses: round2(exp), fixed,
+    profit: round2(rev - exp - fixed), rpm: miles ? round2(rev / miles) : 0, rpmTotal: (miles + dh) ? round2(rev / (miles + dh)) : 0,
+    closedAt: new Date().toISOString() };
+}
+function newId(){ return 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+/* ---------- производные данные ---------- */
+function closedMap(){ const m = {}; state.weeks.forEach(w => m[w.week] = w); return m; }
+function isClosed(w){ return !!closedMap()[w]; }
+function weekFixed(w){ const c = closedMap()[w]; return c ? (+c.fixed || 0) : (+state.settings.fixedWeekly || 0); }
+function sortTrips(ts){ return ts.slice().sort((a, b) => (b.date + (b.createdAt || '')).localeCompare(a.date + (a.createdAt || ''))); }
+function tripsOfWeek(w){ return sortTrips(state.trips.filter(t => t.week === w)); }
+function statsFor(ts, weeks){
+  const revenue = sum(ts, 'rate'), tripExp = sum(ts, 'expenses'), miles = sum(ts, 'miles');
+  const fixed = weeks.reduce((a, w) => a + weekFixed(w), 0);
+  const expenses = tripExp + fixed;
+  const deadhead = sum(ts, 'deadhead'), total = miles + deadhead;
+  return { n: ts.length, revenue, expenses, fixed, profit: revenue - expenses, miles, deadhead, total,
+    rpm: miles ? revenue / miles : 0, rpmTotal: total ? revenue / total : 0, emptyPct: total ? Math.round(deadhead / total * 100) : 0 };
+}
+function weekStats(w){ const ts = tripsOfWeek(w); return statsFor(ts, ts.length ? [w] : []); }
+function rangeStats(r){
+  const ts = state.trips.filter(t => t.date >= r.start && t.date <= r.end);
+  const weeks = [...new Set(state.trips.map(t => t.week))].filter(w => w >= r.start && w <= r.end);
+  return { ts, st: statsFor(ts, weeks) };
+}
+function uniq(k){ return [...new Set(state.trips.map(t => t[k]).filter(Boolean))].sort(); }
+
+/* ---------- данные: Google Sheets или демо ---------- */
+async function api(action, payload){
+  if (DEMO) return localApi(action, payload);
+  const res = await fetch(CONFIG.API_URL, {
+    method: 'POST',
+    body: JSON.stringify({ action, payload: payload || {}, initData: (tg && tg.initData) || '' })
+  });
+  let j;
+  try { j = await res.json(); } catch (e) { throw new Error('Таблица ответила не тем форматом. Проверьте URL и публикацию скрипта.'); }
+  if (!j.ok) throw new Error(j.error || 'Ошибка сервера');
+  return j.data;
+}
+const LS_KEY = 'trucking_demo_v1';
+function lsLoad(){
+  try { const raw = localStorage.getItem(LS_KEY); if (raw) return JSON.parse(raw); } catch (e) {}
+  return { trips: [], weeks: [], settings: defaultSettings() };
+}
+function lsSave(db){ try { localStorage.setItem(LS_KEY, JSON.stringify(db)); } catch (e) {} }
+async function localApi(action, p){
+  let db = lsLoad();
+  const closed = new Set(db.weeks.map(w => w.week));
+  if (action === 'saveTrip') {
+    const t = prepTrip(p, db.settings);
+    if (closed.has(t.week)) throw new Error(`Неделя ${weekLabel(t.week)} закрыта, добавлять в неё нельзя`);
+    const i = db.trips.findIndex(x => x.id === t.id);
+    if (i >= 0) {
+      if (closed.has(db.trips[i].week)) throw new Error('Рейс из закрытой недели изменить нельзя');
+      t.createdAt = db.trips[i].createdAt; t.author = db.trips[i].author; db.trips[i] = t;
+    } else { t.id = newId(); t.createdAt = new Date().toISOString(); t.author = 'Демо'; db.trips.push(t); }
+  } else if (action === 'deleteTrip') {
+    const t = db.trips.find(x => x.id === p.id);
+    if (t && closed.has(t.week)) throw new Error('Рейс из закрытой недели удалить нельзя');
+    db.trips = db.trips.filter(x => x.id !== p.id);
+  } else if (action === 'closeWeek') {
+    if (closed.has(p.week)) throw new Error('Неделя уже закрыта');
+    db.weeks.push(weekSummary(db.trips, p.week, db.settings.fixedWeekly));
+  } else if (action === 'saveSettings') {
+    SETTINGS_META.forEach(m => db.settings[m[0]] = parseNum(p[m[0]]));
+    db.trips = db.trips.map(t => closed.has(t.week) ? t : Object.assign(t, calcTrip(t, db.settings)));
+  } else if (action === 'seedDemo') {
+    db = Object.assign({ settings: db.settings }, seedData(db.settings));
+  } else if (action === 'resetDemo') {
+    db = { trips: [], weeks: [], settings: defaultSettings() };
+  }
+  lsSave(db);
+  return JSON.parse(JSON.stringify(db));
+}
+function seedData(settings){
+  let s = 11; const rnd = () => (s = (s * 16807) % 2147483647, (s - 1) / 2147483646);
+  const pick = a => a[Math.floor(rnd() * a.length)];
+  const cities = ['Chicago, IL','Dallas, TX','Atlanta, GA','Memphis, TN','Columbus, OH','Denver, CO','Kansas City, MO','Nashville, TN','Indianapolis, IN','Charlotte, NC','Louisville, KY','Oklahoma City, OK'];
+  const customers = ['Northline Logistics','Prairie Freight','BlueRidge Brokerage','Summit Cargo','Lakeshore Transport'];
+  const cargos = ['Сухой груз','Рефрижератор','Стройматериалы','Напитки','Бумага'];
+  const trucks = ['Truck 101','Truck 102'];
+  const trips = [], weeks = [], cur = curWeek(), today = todayISO();
+  for (let k = 11; k >= 0; k--) {
+    const w = addDays(cur, -7 * k);
+    trucks.forEach(tr => {
+      let day = 0;
+      for (let j = 0; j < 3; j++) {
+        const date = addDays(w, Math.min(6, day)); day += 1 + Math.floor(rnd() * 3);
+        if (date > today) continue;
+        const from = pick(cities); let to = pick(cities);
+        if (to === from) to = cities[(cities.indexOf(from) + 3) % cities.length];
+        const miles = 300 + Math.round(rnd() * 800);
+        const rate = Math.round(miles * (1.85 + rnd() * 0.9) / 25) * 25;
+        const deadhead = rnd() < 0.25 ? 0 : 20 + Math.round(rnd() * 160);
+        const t = prepTrip({ date, from, to, customer: pick(customers), truck: tr, cargo: pick(cargos), miles, deadhead, rate,
+          tolls: rnd() < 0.3 ? Math.round(rnd() * 60) : 0 }, settings);
+        t.id = newId(); t.createdAt = new Date().toISOString(); t.author = 'Демо';
+        trips.push(t);
+      }
+    });
+    if (w !== cur) weeks.push(weekSummary(trips, w, settings.fixedWeekly));
+  }
+  return { trips, weeks };
+}
+
+/* ---------- Telegram и тема ---------- */
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function applyTheme(){
+  const dark = IN_TG ? tg.colorScheme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  try {
+    if (IN_TG && tg.isVersionAtLeast('6.9')) {
+      tg.setHeaderColor(cssVar('--bg')); tg.setBackgroundColor(cssVar('--bg'));
+      if (tg.isVersionAtLeast('7.10') && tg.setBottomBarColor) tg.setBottomBarColor(cssVar('--surface'));
+    }
+  } catch (e) {}
+}
+function haptic(type){ try { tg.HapticFeedback.notificationOccurred(type); } catch (e) {} }
+function tap(){ try { tg.HapticFeedback.selectionChanged(); } catch (e) {} }
+function ask(msg){
+  return new Promise(res => {
+    try { if (IN_TG && tg.isVersionAtLeast('6.2')) { tg.showConfirm(msg, ok => res(!!ok)); return; } } catch (e) {}
+    res(window.confirm(msg));
+  });
+}
+let toastTimer;
+function toast(msg, isErr){
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = 'show' + (isErr ? ' err' : '');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.className = '', isErr ? 4000 : 2200);
+}
+
+/* ---------- навигация ---------- */
+function setHead(title, sub){ document.getElementById('title').textContent = title; document.getElementById('subtitle').textContent = sub || ''; }
+function go(view){ state.view = view; render(); window.scrollTo(0, 0); syncBack(); }
+function syncBack(){
+  if (!IN_TG || !tg.BackButton) return;
+  try { (state.view === 'add' && state.editId) ? tg.BackButton.show() : tg.BackButton.hide(); } catch (e) {}
+}
+function render(){
+  charts.forEach(c => c.destroy()); charts = [];
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.view === state.view && !(state.view === 'add' && state.editId)));
+  if (!state.loaded) { setHead('Учёт рейсов', ''); main.innerHTML = '<p class="hint center">Загрузка…</p>'; return; }
+  if (state.error) {
+    setHead('Нет связи с таблицей', '');
+    main.innerHTML = `<div class="card"><p style="margin:0">${esc(state.error)}</p><button class="btn" data-act="retry">Повторить</button></div>`;
+    return;
+  }
+  ({ week: renderWeek, add: renderForm, history: renderHistory, dash: renderDash, settings: renderSettings })[state.view]();
+}
+
+/* ---------- общие блоки ---------- */
+function signBlock(st, label){
+  const kpi = (l, v) => `<div><small>${l}</small><b>${v}</b></div>`;
+  return `<div class="sign"><div class="sign-in">
+    <div class="sign-label">${label}${st.profit < 0 ? '<span class="loss">убыток</span>' : ''}</div>
+    <div class="sign-num">${money(st.profit)}</div>
+    <div class="sign-kpis">
+      ${kpi('Выручка', money(st.revenue))}${kpi('Расходы', money(st.expenses))}${kpi('Маржа', st.revenue ? Math.round(st.profit / st.revenue * 100) + '%' : '—')}
+      ${kpi('$/mile гружёный', rpmFmt(st.rpm))}${kpi('$/mile всего', rpmFmt(st.rpmTotal))}${kpi('Пустые', st.emptyPct + '%')}
+    </div>
+    <div class="sign-note">${st.n} ${plural(st.n, TRIPS_WORD)}, ${num(st.miles)} гружёных и ${num(st.deadhead)} пустых миль${st.fixed ? `. В расходах ${money(st.fixed)} постоянных` : ''}</div>
+  </div></div>`;
+}
+function tripCard(t){
+  const d = parseISO(t.date);
+  return `<div class="trip" role="button" tabindex="0" data-act="edit-trip" data-id="${esc(t.id)}">
+    <div class="trip-date"><b>${d.getUTCDate()}</b><span>${DOW[d.getUTCDay()]}</span></div>
+    <div class="trip-main">
+      <div class="route"><span class="city">${esc(t.from)}</span><span class="road" aria-hidden="true"></span><span class="city">${esc(t.to)}</span></div>
+      <div class="meta">${t.customer ? `<span>${esc(t.customer)}</span>` : ''}${t.truck ? `<span class="chip">${esc(t.truck)}</span>` : ''}${t.cargo ? `<span>${esc(t.cargo)}</span>` : ''}</div>
+      <div class="trip-nums">
+        <div><small>Ставка</small><b>${money(t.rate)}</b></div>
+        <div><small>Мили</small><b>${num(t.miles)}</b>${+t.deadhead ? `<em>+${num(t.deadhead)} пуст.</em>` : ''}</div>
+        <div><small>$/mile</small><b>${rpmFmt(t.rpm)}</b>${+t.deadhead ? `<em>${rpmFmt(t.rpmTotal)} всего</em>` : ''}</div>
+        <div><small>Прибыль</small><b class="${t.profit < 0 ? 'neg' : 'pos'}">${money(t.profit)}</b></div>
+      </div>
+    </div>
+  </div>`;
+}
+function emptyBlock(text){
+  return `<div class="empty">${ICON_TRUCK}<p>${text}</p><button class="btn" data-act="go" data-view="add">Добавить рейс</button></div>`;
+}
+
+/* ---------- экран: текущая неделя ---------- */
+function renderWeek(){
+  const w = curWeek(), ts = tripsOfWeek(w), closed = closedMap();
+  setHead('Эта неделя', weekLabel(w));
+  const pending = [...new Set(state.trips.map(t => t.week))].filter(x => x < w && !closed[x]).sort();
+  let h = pending.map(pw => `<div class="notice"><span>Неделя <b>${weekLabel(pw)}</b> не закрыта</span>
+    <button class="btn small" data-act="close-week" data-week="${pw}">Закрыть</button></div>`).join('');
+  h += signBlock(weekStats(w), 'Чистая прибыль за неделю');
+  if (!ts.length) {
+    h += emptyBlock('На этой неделе рейсов пока нет');
+  } else {
+    h += `<h2 class="sec"><span>Рейсы</span><small>${ts.length} ${plural(ts.length, TRIPS_WORD)}</small></h2>
+      <div class="list">${ts.map(tripCard).join('')}</div>`;
+    h += closed[w] ? '<p class="hint center">Неделя закрыта</p>'
+                   : `<button class="btn secondary" data-act="close-week" data-week="${w}">Закрыть неделю</button>`;
+  }
+  main.innerHTML = h;
+}
+
+/* ---------- экран: добавить / изменить рейс ---------- */
+function renderForm(){
+  const editing = state.editId ? state.trips.find(t => t.id === state.editId) : null;
+  if (state.editId && !editing) state.editId = null;
+  const last = sortTrips(state.trips)[0];
+  const t = editing || state.draft || { date: todayISO(), truck: last ? last.truck : '' };
+  setHead(editing ? 'Изменить рейс' : 'Новый рейс', editing ? 'Неделя ' + weekLabel(editing.week) : 'Заполните маршрут и ставку');
+  const v = x => (x === 0 || x == null) ? '' : x;
+  const f = (id, label, val, extra) => `<label class="field"><span>${label}</span><input class="input" id="f_${id}" value="${esc(val)}" ${extra || ''}></label>`;
+  const dl = (id, arr) => `<datalist id="${id}">${arr.map(x => `<option value="${esc(x)}">`).join('')}</datalist>`;
+  const cities = [...new Set(uniq('from').concat(uniq('to')))].sort();
+  const hasExtra = +t.fuel > 0 || +t.tolls > 0 || +t.other > 0;
+  main.innerHTML = `
+    ${dl('dl_city', cities)}${dl('dl_cust', uniq('customer'))}${dl('dl_truck', uniq('truck'))}${dl('dl_cargo', uniq('cargo'))}
+    <h2 class="sec" style="margin-top:4px">Дата загрузки</h2>
+    <div class="card"><div class="date-row">
+      <input class="input" id="f_date" type="date" value="${esc(t.date)}" aria-label="Дата загрузки">
+      <button class="pill" data-act="set-date" data-d="0">Сегодня</button>
+      <button class="pill" data-act="set-date" data-d="-1">Вчера</button>
+    </div></div>
+
+    <h2 class="sec">Маршрут</h2>
+    <div class="card route-edit">
+      <div>
+        ${f('from', 'Откуда', t.from, 'list="dl_city" autocomplete="off" placeholder="Chicago, IL"')}
+        ${f('to', 'Куда', t.to, 'list="dl_city" autocomplete="off" placeholder="Dallas, TX"')}
+      </div>
+      <button class="swap" data-act="swap" aria-label="Поменять местами">${ICON_SWAP}</button>
+    </div>
+
+    <h2 class="sec">Заказ</h2>
+    <div class="card">
+      ${f('customer', 'Заказчик', t.customer, 'list="dl_cust" autocomplete="off" placeholder="Название брокера"')}
+      <div class="row2">
+        ${f('truck', 'Машина', t.truck, 'list="dl_truck" autocomplete="off" placeholder="Truck 101"')}
+        ${f('cargo', 'Груз', t.cargo, 'list="dl_cargo" autocomplete="off" placeholder="Сухой груз"')}
+      </div>
+    </div>
+
+    <h2 class="sec">Деньги</h2>
+    <div class="card">
+      <div class="row2">
+        ${f('deadhead', 'Пустые до загрузки', v(t.deadhead), 'inputmode="numeric" placeholder="0"')}
+        ${f('miles', 'Гружёные мили', v(t.miles), 'inputmode="numeric" placeholder="0"')}
+      </div>
+      ${f('rate', 'Ставка за рейс, $', v(t.rate), 'inputmode="decimal" placeholder="0"')}
+    </div>
+    <div class="result" id="preview"></div>
+
+    <details class="card" ${hasExtra ? 'open' : ''}>
+      <summary>Фактические расходы<small>по желанию</small></summary>
+      <div class="inner">
+        ${f('fuel', 'Топливо за весь рейс, $', v(t.fuel), 'inputmode="decimal" placeholder="По ставкам из настроек"')}
+        <div class="row2">
+          ${f('tolls', 'Tolls, $', v(t.tolls), 'inputmode="decimal" placeholder="0"')}
+          ${f('other', 'Прочее, $', v(t.other), 'inputmode="decimal" placeholder="0"')}
+        </div>
+      </div>
+    </details>
+
+    <button class="btn" data-act="save-trip">${editing ? 'Сохранить изменения' : 'Сохранить рейс'}</button>
+    ${editing ? `<button class="btn danger" data-act="delete-trip">Удалить рейс</button>
+                 <button class="btn secondary" data-act="cancel-edit">Отмена</button>`
+              : (state.draft ? `<button class="btn secondary" data-act="clear-draft">Очистить форму</button>` : '')}`;
+  updatePreview(); updatePills();
+}
+function readForm(){
+  const g = id => { const el = document.getElementById('f_' + id); return el ? el.value : ''; };
+  return { date: g('date'), from: g('from'), to: g('to'), customer: g('customer'), truck: g('truck'), cargo: g('cargo'),
+    miles: g('miles'), deadhead: g('deadhead'), rate: g('rate'), fuel: g('fuel'), tolls: g('tolls'), other: g('other') };
+}
+function updatePills(){
+  const el = document.getElementById('f_date'); if (!el) return;
+  document.querySelectorAll('[data-act="set-date"]').forEach(b => b.classList.toggle('on', el.value === addDays(todayISO(), +b.dataset.d)));
+}
+function updatePreview(){
+  const el = document.getElementById('preview'); if (!el) return;
+  const t = prepTrip(readForm(), state.settings), p = calcParts(t, state.settings);
+  const parts = [['водитель', p.driver], ['топливо гружёный', p.fuelLoaded], ['топливо пустой', p.fuelEmpty],
+    ['диспетчер', p.dispatch], ['факторинг', p.factoring], ['tolls', p.tolls], ['прочее', p.other]]
+    .filter(x => x[1] > 0).map(x => `${x[0]} ${money(x[1])}`).join(', ');
+  el.innerHTML = `
+    <div><small>$/mile гружёный</small><b>${t.miles ? rpmFmt(t.rpm) : '—'}</b></div>
+    <div><small>$/mile всего</small><b>${t.totalMiles ? rpmFmt(t.rpmTotal) : '—'}</b></div>
+    <div><small>Прибыль</small><b class="${t.profit < 0 ? 'neg' : 'pos'}">${money(t.profit)}</b></div>
+    <div class="breakdown">${parts ? `Расходы ${money(t.expenses)}: ${parts}` : 'Введите мили и ставку, прибыль посчитается сама'}</div>`;
+}
+function validate(t){
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t.date)) return 'Укажите дату загрузки';
+  if (!t.from || !t.to) return 'Укажите, откуда и куда';
+  if (!(t.miles > 0)) return 'Укажите гружёные мили';
+  if (t.deadhead < 0) return 'Пустые мили не могут быть отрицательными';
+  if (!(t.rate > 0)) return 'Укажите стоимость перевозки';
+  return '';
+}
+
+/* ---------- экран: история ---------- */
+function renderHistory(){
+  setHead('История', 'Все недели с рейсами');
+  const closed = closedMap(), cur = curWeek();
+  const weeks = [...new Set(state.trips.map(t => t.week).concat(state.weeks.map(w => w.week)))].sort().reverse();
+  if (!weeks.length) { main.innerHTML = emptyBlock('История появится после первого рейса'); return; }
+  const stats = {}; weeks.forEach(w => stats[w] = weekStats(w));
+  const max = Math.max(1, ...weeks.map(w => Math.abs(stats[w].profit)));
+  let h = '', lastMonth = '';
+  weeks.forEach(w => {
+    const d = parseISO(w), mKey = MN[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+    if (mKey !== lastMonth) { h += `<h2 class="month">${mKey}</h2>`; lastMonth = mKey; }
+    const st = stats[w], open = state.openWeek === w;
+    const status = closed[w] ? '<div class="status">закрыта</div>'
+      : w === cur ? '<div class="status cur">текущая</div>' : '<div class="status warn">не закрыта</div>';
+    h += `<div class="wk">
+      <div class="wk-head" role="button" tabindex="0" data-act="toggle-week" data-week="${w}" aria-expanded="${open}">
+        <div class="wk-title">${weekLabel(w)}</div>
+        <div class="wk-profit ${st.profit < 0 ? 'neg' : ''}">${money(st.profit)}</div>
+        <div class="wk-sub"><span>${st.n} ${plural(st.n, TRIPS_WORD)}</span><span>${money(st.revenue)} выручка</span><span>${rpmFmt(st.rpmTotal)}/mi всего</span><span>${st.emptyPct}% пустых</span></div>
+        ${status}
+        <div class="meter"><i class="${st.profit < 0 ? 'neg' : ''}" style="width:${Math.round(Math.abs(st.profit) / max * 100)}%"></i></div>
+      </div>
+      ${open ? `<div class="wk-body"><div class="list">${tripsOfWeek(w).map(tripCard).join('')}</div>
+        ${closed[w] ? '' : `<button class="btn secondary" data-act="close-week" data-week="${w}">Закрыть неделю</button>`}</div>` : ''}
+    </div>`;
+  });
+  main.innerHTML = h;
+}
+
+/* ---------- экран: дашборд ---------- */
+function periodRange(p){
+  const today = todayISO(), y = +today.slice(0, 4), m = +today.slice(5, 7);
+  if (p === 'week') { const s = curWeek(); return { start: s, end: addDays(s, 6), label: weekLabel(s), word: 'за неделю' }; }
+  if (p === 'month') return { start: `${y}-${pad(m)}-01`, end: toISO(new Date(Date.UTC(y, m, 0))), label: `${MN[m-1]} ${y}`, word: 'за месяц' };
+  return { start: `${y}-01-01`, end: `${y}-12-31`, label: `${y} год`, word: 'за год' };
+}
+function renderDash(){
+  const r = periodRange(state.dashPeriod), { ts, st } = rangeStats(r);
+  setHead('Дашборд', r.label);
+  const year = todayISO().slice(0, 4);
+  let h = `<div class="seg">${[['week','Неделя'],['month','Месяц'],['year','Год']].map(([k, l]) =>
+    `<button data-act="period" data-p="${k}" class="${k === state.dashPeriod ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  h += signBlock(st, 'Чистая прибыль ' + r.word);
+  if (!window.Chart) { main.innerHTML = h + '<p class="hint">Графики не загрузились. Проверьте интернет и откройте приложение заново.</p>'; return; }
+  const trucks = groupBy(ts, 'truck', 'profit'), custs = groupBy(ts, 'customer', 'rate').slice(0, 6);
+  const none = '<p class="hint" style="margin:12px 0 0">Нет рейсов за этот период</p>';
+  h += `<div class="card chart-card"><h3>Прибыль по неделям</h3><p class="hint">Последние 12 недель</p><div class="chart"><canvas id="c1"></canvas></div></div>
+    <div class="card chart-card"><h3>Выручка и прибыль по месяцам</h3><p class="hint">${year} год</p><div class="chart"><canvas id="c2"></canvas></div></div>
+    <div class="card chart-card"><h3>Машины</h3><p class="hint">Прибыль ${r.word}, без постоянных расходов</p>
+      ${trucks.length ? `<div class="chart" style="height:${40 + trucks.length * 40}px"><canvas id="c3"></canvas></div>` : none}</div>
+    <div class="card chart-card"><h3>Заказчики</h3><p class="hint">Выручка ${r.word}</p>
+      ${custs.length ? `<div class="chart" style="height:${40 + custs.length * 40}px"><canvas id="c4"></canvas></div>` : none}</div>`;
+  main.innerHTML = h;
+
+  const pos = cssVar('--pos'), neg = cssVar('--neg'), rev = cssVar('--rev');
+  Chart.defaults.color = cssVar('--muted');
+  Chart.defaults.borderColor = cssVar('--line');
+  Chart.defaults.font.family = cssVar('--font');
+  Chart.defaults.font.size = 12;
+  const base = horiz => ({
+    responsive: true, maintainAspectRatio: false, indexAxis: horiz ? 'y' : 'x',
+    plugins: { legend: { display: false }, tooltip: { displayColors: false, callbacks: { label: c => (c.dataset.label ? c.dataset.label + ': ' : '') + money(horiz ? c.parsed.x : c.parsed.y) } } },
+    scales: horiz ? { x: { ticks: { callback: moneyShort, maxTicksLimit: 5 }, border: { display: false } }, y: { grid: { display: false }, border: { display: false } } }
+                  : { y: { ticks: { callback: moneyShort, maxTicksLimit: 5 }, border: { display: false } }, x: { grid: { display: false }, border: { display: false } } }
+  });
+  const mk = (id, cfg) => { const el = document.getElementById(id); if (el) charts.push(new Chart(el, cfg)); };
+  const bar = { borderRadius: 5, borderSkipped: false, maxBarThickness: 28 };
+
+  const cw = curWeek(), wks = []; for (let k = 11; k >= 0; k--) wks.push(addDays(cw, -7 * k));
+  const wp = wks.map(w => weekStats(w).profit);
+  mk('c1', { type: 'bar', options: base(false), data: {
+    labels: wks.map(w => { const d = parseISO(w); return d.getUTCDate() + ' ' + MS[d.getUTCMonth()]; }),
+    datasets: [Object.assign({ data: wp, backgroundColor: wp.map(v => v < 0 ? neg : pos) }, bar)] } });
+
+  const months = []; for (let m = 1; m <= +todayISO().slice(5, 7); m++) months.push(m);
+  const ms = months.map(m => rangeStats({ start: `${year}-${pad(m)}-01`, end: toISO(new Date(Date.UTC(+year, m, 0))) }).st);
+  const o2 = base(false); o2.plugins.legend = { display: true, position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, useBorderRadius: true, borderRadius: 3 } };
+  o2.plugins.tooltip.displayColors = true;
+  mk('c2', { type: 'bar', options: o2, data: { labels: months.map(m => MS[m-1]),
+    datasets: [Object.assign({ label: 'Выручка', data: ms.map(s => s.revenue), backgroundColor: rev }, bar),
+               Object.assign({ label: 'Прибыль', data: ms.map(s => s.profit), backgroundColor: ms.map(s => s.profit < 0 ? neg : pos) }, bar)] } });
+
+  mk('c3', { type: 'bar', options: base(true), data: { labels: trucks.map(x => x[0]),
+    datasets: [Object.assign({ data: trucks.map(x => x[1]), backgroundColor: trucks.map(x => x[1] < 0 ? neg : pos) }, bar)] } });
+  mk('c4', { type: 'bar', options: base(true), data: { labels: custs.map(x => x[0]),
+    datasets: [Object.assign({ data: custs.map(x => x[1]), backgroundColor: rev }, bar)] } });
+}
+function groupBy(ts, key, val){
+  const m = {}; ts.forEach(t => { const k = t[key] || 'Без названия'; m[k] = (m[k] || 0) + (+t[val] || 0); });
+  return Object.entries(m).sort((a, b) => b[1] - a[1]);
+}
+
+/* ---------- экран: настройки ---------- */
+function renderSettings(){
+  setHead('Настройки', 'Ставки для расчёта расходов');
+  const s = state.settings, u = IN_TG && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  main.innerHTML = `
+    <div class="card rows">${SETTINGS_META.map(m => `<label class="set-row"><span>${m[1]}<small>${m[3]}</small></span>
+      <input class="input" id="s_${m[0]}" inputmode="decimal" value="${esc(s[m[0]])}"></label>`).join('')}</div>
+    <button class="btn" data-act="save-settings">Сохранить настройки</button>
+    <p class="hint">Расходы рейса складываются из оплаты водителя, топлива, диспетчера, факторинга, tolls и прочего.
+      Топливо считается отдельно для пустых миль до загрузки и для гружёных. Если сумма топлива указана в рейсе, берётся она. Постоянные расходы вычитаются один раз за каждую неделю с рейсами.
+      Новые ставки применяются ко всем незакрытым неделям; закрытые не меняются.</p>
+    <h2 class="sec">Подключение</h2>
+    <div class="card">
+      <div class="status-line"><span class="dot ${DEMO ? '' : 'on'}"></span>${DEMO ? 'Демо-режим' : 'Google Таблица подключена'}</div>
+      <p class="hint" style="margin:6px 0 0">${DEMO ? 'Данные хранятся только на этом телефоне. Чтобы сохранять в таблицу, впишите API_URL в начале файла.' : 'Каждый рейс сразу записывается на лист «Рейсы».'}</p>
+      ${u ? `<p class="hint" style="margin:8px 0 0">${esc([u.first_name, u.last_name].filter(Boolean).join(' '))}, Telegram ID ${esc(u.id)}</p>` : ''}
+    </div>
+    ${DEMO ? `<button class="btn secondary" data-act="seed">Заполнить примером за 12 недель</button>
+              <button class="btn danger" data-act="reset">Очистить демо-данные</button>` : ''}`;
+}
+
+/* ---------- действия ---------- */
+async function mutate(action, payload, okMsg){
+  const d = await api(action, payload);
+  setData(d); toast(okMsg); haptic('success');
+}
+function setData(d){
+  state.trips = (d.trips || []).map(t => {
+    const m = +t.miles || 0, dh = +t.deadhead || 0, r = +t.rate || 0;
+    return Object.assign(t, { deadhead: dh, totalMiles: m + dh, rpmTotal: (m + dh) ? round2(r / (m + dh)) : 0 });
+  });
+  state.weeks = d.weeks || [];
+  state.settings = Object.assign(defaultSettings(), d.settings || {});
+}
+function busy(btn, text){ btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = text; }
+function unbusy(btn){ btn.disabled = false; btn.textContent = btn.dataset.label; }
+function saveDraft(){ if (state.view === 'add' && !state.editId) state.draft = readForm(); }
+
+main.addEventListener('click', async e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const act = el.dataset.act;
+  try {
+    if (act === 'retry') { state.loaded = false; render(); load(); }
+    else if (act === 'go') { state.editId = null; go(el.dataset.view); }
+    else if (act === 'period') { tap(); state.dashPeriod = el.dataset.p; render(); }
+    else if (act === 'toggle-week') { tap(); state.openWeek = state.openWeek === el.dataset.week ? null : el.dataset.week; render(); }
+    else if (act === 'set-date') {
+      document.getElementById('f_date').value = addDays(todayISO(), +el.dataset.d);
+      tap(); updatePills(); saveDraft();
+    }
+    else if (act === 'swap') {
+      const a = document.getElementById('f_from'), b = document.getElementById('f_to');
+      [a.value, b.value] = [b.value, a.value]; tap(); saveDraft();
+    }
+    else if (act === 'edit-trip') {
+      const t = state.trips.find(x => x.id === el.dataset.id);
+      if (t && isClosed(t.week)) { toast('Неделя закрыта, рейс только для просмотра'); return; }
+      state.editId = el.dataset.id; go('add');
+    }
+    else if (act === 'cancel-edit') { state.editId = null; go('week'); }
+    else if (act === 'clear-draft') { state.draft = null; render(); }
+    else if (act === 'save-trip') {
+      const t = prepTrip(readForm(), state.settings); if (state.editId) t.id = state.editId;
+      const err = validate(t); if (err) { toast(err, true); haptic('error'); return; }
+      busy(el, 'Сохранение…');
+      try { await mutate('saveTrip', t, state.editId ? 'Изменения сохранены' : 'Рейс сохранён'); }
+      catch (x) { unbusy(el); throw x; }
+      state.editId = null; state.draft = null;
+      if (t.week === curWeek()) go('week'); else { state.openWeek = t.week; go('history'); }
+    }
+    else if (act === 'delete-trip') {
+      if (!(await ask('Удалить этот рейс?'))) return;
+      busy(el, 'Удаление…');
+      try { await mutate('deleteTrip', { id: state.editId }, 'Рейс удалён'); } catch (x) { unbusy(el); throw x; }
+      state.editId = null; go('week');
+    }
+    else if (act === 'close-week') {
+      const w = el.dataset.week;
+      if (!(await ask(`Закрыть неделю ${weekLabel(w)}? Итоги запишутся в таблицу, а рейсы этой недели больше нельзя будет менять.`))) return;
+      busy(el, 'Закрываю…');
+      try { await mutate('closeWeek', { week: w }, 'Неделя закрыта'); } catch (x) { unbusy(el); throw x; }
+      render();
+    }
+    else if (act === 'save-settings') {
+      const s = {}; SETTINGS_META.forEach(m => s[m[0]] = parseNum(document.getElementById('s_' + m[0]).value));
+      if (Object.values(s).some(v => v < 0)) { toast('Ставки не могут быть отрицательными', true); return; }
+      busy(el, 'Сохранение…');
+      try { await mutate('saveSettings', s, 'Настройки сохранены'); } catch (x) { unbusy(el); throw x; }
+      render();
+    }
+    else if (act === 'seed') {
+      if (!(await ask('Заменить демо-данные примером за 12 недель?'))) return;
+      await mutate('seedDemo', {}, 'Пример загружен'); go('dash');
+    }
+    else if (act === 'reset') {
+      if (!(await ask('Удалить все демо-данные с этого телефона?'))) return;
+      await mutate('resetDemo', {}, 'Демо-данные очищены'); go('week');
+    }
+  } catch (x) { toast(x.message || String(x), true); haptic('error'); }
+});
+main.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"]')) { e.preventDefault(); e.target.click(); }
+});
+main.addEventListener('input', () => {
+  if (state.view !== 'add') return;
+  updatePreview(); updatePills(); saveDraft();
+});
+document.getElementById('tabs').addEventListener('click', e => {
+  const b = e.target.closest('.tab'); if (!b) return;
+  tap();
+  if (b.dataset.view === 'add' || state.editId) state.editId = null;
+  go(b.dataset.view);
+});
+
+async function load(){
+  try { setData(await api('getAll')); state.error = null; }
+  catch (e) { state.error = e.message || 'Не удалось загрузить данные'; }
+  state.loaded = true; render();
+}
+
+applyTheme();
+if (IN_TG) {
+  try {
+    tg.ready(); tg.expand();
+    if (tg.isVersionAtLeast('7.7')) tg.disableVerticalSwipes();
+    tg.BackButton.onClick(() => { state.editId = null; go('week'); });
+    tg.onEvent('themeChanged', () => { applyTheme(); render(); });
+  } catch (e) {}
+} else {
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { applyTheme(); render(); });
+}
+render();
+load();
+</script>
+</body>
+</html>
