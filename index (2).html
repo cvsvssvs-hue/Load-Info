@@ -1,0 +1,1505 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Учёт рейсов</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+  (function () {
+    var t = window.Telegram && Telegram.WebApp;
+    var dark = (t && t.initData) ? t.colorScheme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<style>
+*{box-sizing:border-box}
+:root{
+  --bg:#edf1ee; --surface:#ffffff; --surface2:#f2f5f3;
+  --ink:#16201a; --muted:#68746c; --line:#e1e7e3;
+  --sign:#0b6b45; --sign-soft:#e1f0e7;
+  --pos:#0b7a4b; --neg:#c8382f;
+  --fuel:#a96a00; --fuel-soft:#fbf0d9; --fuel-bar:#e3a63a;
+  --co:#2f5fb3; --co-soft:#e3ebf8;
+  --rev:#a8d5bd;
+  --shadow:0 1px 2px rgba(16,40,26,.06),0 3px 10px rgba(16,40,26,.05);
+  --font:"Overpass",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  color-scheme:light;
+}
+:root[data-theme="dark"]{
+  --bg:#0c120f; --surface:#151d19; --surface2:#1c2621;
+  --ink:#e8eee9; --muted:#8b988f; --line:#25302a;
+  --sign:#136f47; --sign-soft:#15291f;
+  --pos:#46d08f; --neg:#ff6d60;
+  --fuel:#f0b43a; --fuel-soft:#2a2314; --fuel-bar:#c8901f;
+  --co:#8db3f5; --co-soft:#1a2436;
+  --rev:#2d5d46;
+  --shadow:none;
+  color-scheme:dark;
+}
+html{-webkit-text-size-adjust:100%;background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 var(--font);
+  padding-top:env(safe-area-inset-top,0px);-webkit-font-smoothing:antialiased}
+b,.num,input{font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--pos);outline-offset:2px}
+svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+/* шапка */
+.top{max-width:640px;margin:0 auto;padding:18px 18px 2px}
+.top-in{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.top h1{margin:0;font-size:28px;line-height:1.15;font-weight:800;letter-spacing:-.02em}
+.top p{margin:3px 0 0;color:var(--muted);font-size:15px}
+.top p:empty{display:none}
+.avatar{flex:none;width:42px;height:42px;border:0;border-radius:50%;background:var(--surface);box-shadow:var(--shadow);
+  color:var(--pos);font-size:17px;font-weight:800;cursor:pointer;display:grid;place-items:center;-webkit-tap-highlight-color:transparent}
+.avatar.on{background:var(--sign);color:#fff}
+main{max-width:640px;margin:0 auto;padding:12px 14px calc(110px + env(safe-area-inset-bottom,0px))}
+body.ob main{padding-bottom:calc(30px + env(safe-area-inset-bottom,0px))}
+body.ob .tabs,body.ob .avatar{display:none}
+
+/* переключатель недель */
+.weeknav{display:grid;grid-template-columns:44px 1fr 44px;align-items:center;gap:8px;margin-bottom:12px}
+.weeknav button{width:44px;height:44px;border:0;border-radius:13px;background:var(--surface);box-shadow:var(--shadow);display:grid;place-items:center;cursor:pointer}
+.weeknav button:disabled{opacity:.35;cursor:default}
+.weeknav div{text-align:center}
+.weeknav b{display:block;font-size:17px;font-weight:700}
+.weeknav small{font-size:13px;color:var(--muted);font-weight:600}
+.weeknav small.cur{color:var(--pos)}
+.weeknav small a{color:var(--pos);text-decoration:none;cursor:pointer}
+
+/* дорожный знак */
+.sign{background:var(--sign);color:#fff;border-radius:20px;padding:5px;box-shadow:var(--shadow)}
+.sign-in{border:2px solid rgba(255,255,255,.9);border-radius:16px;padding:14px 16px 13px}
+.sign-label{font-size:14px;font-weight:600;opacity:.88;display:flex;align-items:center;gap:8px}
+.sign-num{font-size:46px;line-height:1.05;font-weight:800;letter-spacing:-.02em;margin-top:6px}
+.loss{background:#fff;color:#c8382f;font-size:12px;font-weight:700;border-radius:999px;padding:2px 8px 1px}
+.sign-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px 8px;margin-top:14px;padding-top:13px;border-top:1px solid rgba(255,255,255,.3)}
+.sign-kpis small{display:block;font-size:12px;opacity:.78}
+.sign-kpis b{font-size:17px;font-weight:700}
+.sign-note{font-size:12px;opacity:.8;margin-top:11px;line-height:1.45}
+
+/* топливо */
+.fuel-card{display:grid;grid-template-columns:46px 1fr auto;gap:12px;align-items:center;background:var(--surface);border-radius:18px;
+  padding:13px 13px 13px 12px;box-shadow:var(--shadow);margin-top:12px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.fuel-ico{width:46px;height:46px;border-radius:13px;background:var(--fuel-soft);color:var(--fuel);display:grid;place-items:center}
+.fuel-main small{display:block;font-size:13px;color:var(--muted);font-weight:600}
+.fuel-main b{font-size:22px;font-weight:800}
+.fuel-main .tag{font-size:11px;font-weight:700;color:var(--muted);background:var(--surface2);border-radius:6px;padding:2px 6px 1px;margin-left:6px;white-space:nowrap}
+.fuel-stats{display:flex;flex-wrap:wrap;gap:2px 12px;font-size:13px;color:var(--muted);margin-top:2px}
+.fuel-stats b{font-size:13px;color:var(--ink);font-weight:700}
+.add-mini{border:0;border-radius:11px;background:var(--fuel-soft);color:var(--fuel);font-weight:700;font-size:14px;padding:9px 12px 7px;cursor:pointer;white-space:nowrap}
+.fuel-sum{background:var(--surface);border-radius:20px;box-shadow:var(--shadow);padding:16px}
+.fuel-sum .head{display:flex;align-items:center;gap:12px}
+.fuel-sum .big{font-size:38px;font-weight:800;line-height:1.05;letter-spacing:-.02em}
+.fuel-sum .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.fuel-sum .grid small{display:block;font-size:12px;color:var(--muted)}
+.fuel-sum .grid b{font-size:17px}
+.note{font-size:13px;color:var(--muted);margin-top:10px;line-height:1.45}
+
+/* секции и списки */
+.sec{display:flex;justify-content:space-between;align-items:baseline;font-size:15px;font-weight:700;color:var(--muted);margin:24px 4px 9px}
+.sec small{font-weight:600;font-size:13px}
+.list{display:flex;flex-direction:column;gap:9px}
+.trip,.fill{display:grid;grid-template-columns:46px 1fr;gap:12px;background:var(--surface);border-radius:16px;
+  padding:12px 13px 11px 12px;box-shadow:var(--shadow);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.trip:active,.fill:active{background:var(--surface2)}
+.dtile{background:var(--surface2);border-radius:11px;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.dtile b{font-size:20px;font-weight:800;line-height:1}
+.dtile span{font-size:11px;font-weight:600;color:var(--muted);margin-top:4px}
+.fill .dtile{background:var(--fuel-soft)} .fill .dtile span{color:var(--fuel)}
+.trip-main{min-width:0}
+.route{display:flex;align-items:center;gap:9px;font-size:16px;font-weight:700}
+.city{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.road{flex:1 1 20px;min-width:20px;height:2px;position:relative;background:repeating-linear-gradient(90deg,var(--muted) 0 5px,transparent 5px 9px)}
+.road::before,.road::after{content:"";position:absolute;top:50%;width:8px;height:8px;border-radius:50%;transform:translateY(-50%)}
+.road::before{left:-2px;border:2px solid var(--pos);background:var(--surface)}
+.road::after{right:-2px;background:var(--pos)}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:5px;font-size:13px;color:var(--muted)}
+.chip{background:var(--surface2);color:var(--ink);border-radius:6px;padding:2px 7px 1px;font-size:12px;font-weight:600}
+.chip.co{background:var(--co-soft);color:var(--co);font-weight:700}
+.trip-nums{display:grid;grid-template-columns:1.1fr .9fr .95fr 1.05fr;gap:4px;margin-top:10px;padding-top:9px;border-top:1px solid var(--line)}
+.trip-nums small{display:block;font-size:11px;color:var(--muted)}
+.trip-nums b{font-size:15px;font-weight:700}
+.trip-nums em{display:block;font-style:normal;font-size:11px;color:var(--muted);margin-top:1px;white-space:nowrap}
+.trip-nums em.co{color:var(--co);font-weight:700}
+.trip-nums > div:last-child{text-align:right}
+.fill-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.fill-row b{font-size:16px}
+.fill-row .amt{font-size:18px;font-weight:800}
+.pos{color:var(--pos)} .neg{color:var(--neg)}
+
+/* кнопки */
+.btn{display:block;width:100%;border:0;border-radius:15px;background:var(--sign);color:#fff;font-size:17px;font-weight:700;
+  padding:16px;margin-top:14px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.btn:active{filter:brightness(.92)}
+.btn.secondary{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.btn.danger{background:var(--surface);color:var(--neg);box-shadow:var(--shadow)}
+.btn.fuel{background:var(--fuel-soft);color:var(--fuel);box-shadow:none}
+.btn.co{background:var(--co-soft);color:var(--co);box-shadow:none;margin-top:10px}
+.btn:disabled{opacity:.55}
+.btn-row{display:grid;grid-template-columns:1fr 2fr;gap:10px}
+.btn-row .btn{margin-top:18px}
+
+/* форма */
+.card{background:var(--surface);border-radius:18px;padding:14px;box-shadow:var(--shadow)}
+.card h3{margin:0;font-size:16px;font-weight:700}
+.field{display:block;min-width:0}
+.field + .field,.row2 + .field,.field + .row2,.row2 + .row2,.row3 + .field,.row2 + .row3,.field + .row3{margin-top:12px}
+.field > span{display:block;font-size:13px;font-weight:600;color:var(--muted);margin:0 2px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.field > small{display:block;font-size:12px;color:var(--muted);margin:5px 2px 0}
+.input{display:block;width:100%;min-width:0;min-height:48px;background:var(--surface2);border:1.5px solid transparent;border-radius:12px;
+  color:var(--ink);font:inherit;font-size:17px;padding:11px 12px 9px;outline:none;-webkit-appearance:none;appearance:none}
+.input:focus{border-color:var(--pos);background:var(--surface)}
+.input::placeholder{color:var(--muted);opacity:.55}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.row2 > .field,.row3 > .field{margin-top:0}
+.date-row{display:flex;gap:8px;align-items:center}
+.date-row .input{flex:1}
+.pill{border:0;background:var(--surface2);border-radius:999px;padding:12px 13px 10px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap}
+.pill.on{background:var(--sign-soft);color:var(--pos)}
+.route-edit{display:grid;grid-template-columns:1fr 44px;gap:10px;align-items:center}
+.swap{width:44px;height:44px;margin-top:22px;border:0;border-radius:12px;background:var(--surface2);color:var(--pos);display:grid;place-items:center;cursor:pointer}
+.result{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--sign-soft);border-radius:18px;padding:14px 16px;margin-top:12px}
+.result.fuelres{background:var(--fuel-soft)}
+.result small{display:block;font-size:12px;font-weight:600;color:var(--muted)}
+.result b{font-size:21px;font-weight:800}
+.result > div:nth-child(3){text-align:right}
+.breakdown{grid-column:1/-1;font-size:12px;color:var(--muted);margin-top:9px;padding-top:9px;border-top:1px solid var(--line);line-height:1.5}
+details.card{padding:0;margin-top:12px}
+details summary{display:flex;align-items:center;gap:8px;padding:15px 14px 14px;font-weight:700;cursor:pointer;list-style:none}
+details summary::-webkit-details-marker{display:none}
+details summary small{font-weight:600;color:var(--muted);font-size:13px;margin-left:auto}
+details summary::after{content:"";width:8px;height:8px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg) translateY(-2px);transition:transform .15s}
+details[open] summary::after{transform:rotate(-135deg) translateY(-2px)}
+details .inner{padding:0 14px 14px}
+
+/* догруз */
+.extra{border-left:4px solid var(--co)}
+.extra + .extra{margin-top:10px}
+.extra-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.extra-head b{font-size:15px;color:var(--co)}
+.link-del{border:0;background:none;color:var(--neg);font-size:14px;font-weight:700;cursor:pointer;padding:6px 0 4px 10px}
+.co-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.co-grid small{display:block;font-size:12px;color:var(--muted)}
+.co-grid b{font-size:18px;font-weight:800}
+.mpg-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.mpg-box{border-radius:12px;padding:10px 12px;background:var(--surface2)}
+.mpg-box.d{background:var(--co-soft)}
+.mpg-box small{display:block;font-size:12px;color:var(--muted);font-weight:600}
+.mpg-box b{font-size:22px;font-weight:800}
+.mpg-box.d b{color:var(--co)}
+
+/* карта */
+.mapbox{position:relative;height:300px;border-radius:18px;overflow:hidden;box-shadow:var(--shadow);background:var(--surface2)}
+#map{position:absolute;inset:0;z-index:0}
+.map-msg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:14px;padding:24px}
+.leaflet-container{font-family:var(--font);background:var(--surface2)}
+.leaflet-tooltip.pin{background:var(--surface);color:var(--ink);border:0;border-radius:8px;font-weight:700;font-size:12px;padding:3px 7px 2px;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.leaflet-tooltip.pin::before{display:none}
+.zip-row{display:grid;grid-template-columns:20px 1fr auto;gap:10px;align-items:center}
+.zip-row + .zip-row{margin-top:10px}
+.zdot{width:14px;height:14px;border-radius:50%;justify-self:center}
+.zdot.cur{border:3px solid var(--muted)} .zdot.pick{background:var(--pos)} .zdot.drop{background:var(--ink)}
+.zip-in{position:relative}
+.zip-in .input{padding-right:12px;letter-spacing:.04em}
+.zip-in small{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:13px;font-weight:700;color:var(--pos);max-width:58%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none}
+.zip-in small.err{color:var(--neg)}
+.geo{width:48px;height:48px;border:0;border-radius:12px;background:var(--surface2);color:var(--pos);display:grid;place-items:center;cursor:pointer}
+.geo.ph{visibility:hidden}
+.rt-miles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.rt-miles small{display:block;font-size:12px;color:var(--muted);font-weight:600}
+.rt-miles b{font-size:22px;font-weight:800}
+.rt-miles > div:last-child{text-align:right}
+.toll{display:flex;gap:10px;align-items:center;margin-top:12px;padding:10px 12px;border-radius:12px;background:var(--surface2);font-size:14px}
+.toll.yes{background:var(--fuel-soft)}
+.toll b{font-weight:700}
+.frow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:11px 0;border-bottom:1px solid var(--line)}
+.frow:last-child{border-bottom:0;padding-bottom:2px}
+.frow b{font-size:15px}
+.frow .v{font-size:18px;font-weight:800;text-align:right}
+.frow small{font-size:12px;color:var(--muted)}
+.frow small.r{text-align:right}
+.frow.d b,.frow.d .v{color:var(--co)}
+
+/* профиль и онбординг */
+.opts{display:flex;flex-direction:column;gap:10px}
+.opt{display:flex;gap:12px;align-items:flex-start;width:100%;text-align:left;background:var(--surface);border:2px solid transparent;
+  border-radius:16px;padding:14px;box-shadow:var(--shadow);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.opt.on{border-color:var(--pos);background:var(--sign-soft)}
+.opt b{display:block;font-size:16px;font-weight:700}
+.opt span{display:block;color:var(--muted);font-size:14px;margin-top:2px}
+.radio{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);flex:none;margin-top:1px;background:var(--surface)}
+.opt.on .radio{border:7px solid var(--pos)}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--surface);border-radius:15px;padding:4px;margin-bottom:12px;box-shadow:var(--shadow)}
+.seg button{border:0;background:none;color:var(--muted);font-weight:700;font-size:14px;padding:10px 4px 8px;border-radius:11px;cursor:pointer}
+.seg button.on{background:var(--sign);color:#fff}
+.seg.in{background:var(--surface2);box-shadow:none;margin:0}
+.seg.in button.on{background:var(--surface);color:var(--pos);box-shadow:var(--shadow)}
+.toggle{display:flex;justify-content:space-between;align-items:center;gap:14px;cursor:pointer}
+.toggle b{display:block;font-size:16px;font-weight:700}
+.toggle span{display:block;font-size:13px;color:var(--muted);margin-top:2px}
+.switch{position:relative;width:52px;height:32px;flex:none}
+.switch input{opacity:0;position:absolute;inset:0;margin:0;cursor:pointer;z-index:1}
+.switch i{position:absolute;inset:0;border-radius:999px;background:var(--line);transition:background .2s}
+.switch i::after{content:"";position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .2s}
+.switch input:checked + i{background:var(--pos)}
+.switch input:checked + i::after{transform:translateX(20px)}
+.divider{height:1px;background:var(--line);margin:14px 0}
+.sub-label{font-size:13px;font-weight:600;color:var(--muted);margin:0 2px 8px}
+.ob-steps{display:flex;gap:6px;margin:4px 0 18px}
+.ob-steps i{flex:1;height:4px;border-radius:2px;background:var(--line)}
+.ob-steps i.on{background:var(--pos)}
+.ob-hero{text-align:center;padding:10px 10px 20px;color:var(--muted)}
+.ob-hero svg{width:72px;height:72px;color:var(--pos);fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ob-hero p{margin:8px 0 0;font-size:15px}
+.status-line{display:flex;align-items:center;gap:8px;font-weight:700}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--fuel)}
+.dot.on{background:var(--pos)}
+
+/* статистика */
+.chart-card{margin-top:12px}
+.chart-card .hint{margin:2px 0 0}
+.chart{position:relative;height:220px;margin-top:12px}
+.wkrow{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.wkrow:last-child{border-bottom:0}
+.wkrow b{font-size:15px}
+.wkrow .r{text-align:right;font-weight:800}
+.wkrow small{font-size:12px;color:var(--muted)}
+.meter{grid-column:1/-1;height:4px;border-radius:2px;background:var(--surface2);margin-top:6px;overflow:hidden}
+.meter i{display:block;height:100%;border-radius:2px;background:var(--pos)}
+.meter i.neg{background:var(--neg)}
+
+.empty{text-align:center;color:var(--muted);padding:30px 20px 8px}
+.empty svg{width:56px;height:56px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;opacity:.7}
+.empty p{margin:10px 0 0}
+.empty .btn{max-width:260px;margin:18px auto 0}
+.hint{color:var(--muted);font-size:13px;line-height:1.45;margin:10px 4px}
+.center{text-align:center}
+
+/* нижнее меню */
+.tabs{position:fixed;left:0;right:0;bottom:0;z-index:500;background:var(--surface);border-top:1px solid var(--line);
+  padding:6px 6px calc(8px + env(safe-area-inset-bottom,0px))}
+.tabs-in{max-width:640px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr)}
+.tab{border:0;background:none;color:var(--muted);font-size:11px;font-weight:700;display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:4px 0 0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.tab svg{width:24px;height:24px}
+.tab.on{color:var(--pos)}
+.tab.add .plus{width:52px;height:52px;border-radius:17px;background:var(--sign);color:#fff;display:grid;place-items:center;margin-top:-24px;
+  box-shadow:0 0 0 5px var(--surface),0 8px 18px rgba(11,107,69,.35)}
+.tab.add .plus svg{width:26px;height:26px;stroke-width:2.4}
+
+#toast{position:fixed;left:50%;bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:900;max-width:88vw;
+  transform:translate(-50%,14px);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
+  background:var(--ink);color:var(--surface);padding:11px 18px 9px;border-radius:14px;font-size:14px;font-weight:600;text-align:center}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+#toast.err{background:var(--neg);color:#fff}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (max-width:360px){.sign-num{font-size:40px}.trip-nums b{font-size:14px}.seg button{font-size:13px}.row3 .field>span{font-size:12px}}
+</style>
+</head>
+<body>
+<header class="top"><div class="top-in">
+  <div><h1 id="title">Учёт рейсов</h1><p id="subtitle"></p></div>
+  <button class="avatar" id="avatar" aria-label="Профиль">?</button>
+</div></header>
+<main id="main"></main>
+
+<nav class="tabs"><div class="tabs-in" id="tabs">
+  <button class="tab" data-view="week"><svg class="i" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>Неделя</span></button>
+  <button class="tab" data-view="map"><svg class="i" viewBox="0 0 24 24"><path d="M9 4.5 3.5 6.5v13L9 17.5l6 2 5.5-2v-13L15 6.5z"/><path d="M9 4.5v13M15 6.5v13"/></svg><span>Карта</span></button>
+  <button class="tab add" data-view="add" aria-label="Добавить рейс"><span class="plus"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span></button>
+  <button class="tab" data-view="fuel"><svg class="i" viewBox="0 0 24 24"><path d="M4.5 21V5.5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2V21M3 21h13M7.5 8.5h4"/><path d="M14.5 11h1.8a1.7 1.7 0 0 1 1.7 1.7V16a1.5 1.5 0 0 0 3 0V8.6L18.3 6"/></svg><span>Топливо</span></button>
+  <button class="tab" data-view="dash"><svg class="i" viewBox="0 0 24 24"><path d="M5 20v-7M12 20V5M19 20v-10"/></svg><span>Статистика</span></button>
+</div></nav>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ================== НАСТРОЙКА ==================
+   API_URL — URL веб-приложения Google Apps Script.
+     Пока пусто, приложение работает в демо-режиме и хранит данные только на этом устройстве.
+   ORS_KEY — необязательно. Бесплатный ключ openrouteservice.org.
+     С ним маршрут строится для грузовика (с учётом ограничений для траков) и точнее находит платные дороги.
+     Без ключа маршрут строится по дорогам для легковой машины. */
+const CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbwCm9UqgpVhCXotAn1bmG9PJAeQu7iyGjuy9LeJEd9W43UUKdWRygP1BN3Y_M7xADqQ/exec', ORS_KEY: '' };
+/* ================================================ */
+
+const tg = window.Telegram && window.Telegram.WebApp;
+const IN_TG = !!(tg && tg.initData);
+const DEMO = !CONFIG.API_URL;
+const main = document.getElementById('main');
+
+const PAY = {
+  percent: ['Процент от ставки', 'Компания платит вам процент от стоимости рейса'],
+  mile:    ['Центы за милю', 'Фиксированная оплата за каждую милю'],
+  owner:   ['Owner-operator', 'Вся ставка ваша, минус диспетч и факторинг']
+};
+const CO_PAY = { none: 'Нет', flat: 'Фикс. сумма', percent: 'Процент' };
+const DEFAULT_PROFILE = { name: '', payType: 'percent', percent: 30, cpm: 0.65, emptyCpm: 0.5, dispatch: 10, factoring: 3,
+  coPay: 'none', coValue: 0, paysFuel: false, weekly: 0, mpgEmpty: 7.5, mpgLoaded: 6.5, mpgDouble: 5.8, tollRate: 0.4 };
+const NUM_KEYS = ['percent','cpm','emptyCpm','dispatch','factoring','coValue','weekly','mpgEmpty','mpgLoaded','mpgDouble','tollRate'];
+
+const I = {
+  truck: '<svg viewBox="0 0 48 48"><path d="M4 31V14a2 2 0 0 1 2-2h21a2 2 0 0 1 2 2v17"/><path d="M29 18h7.5l6.5 7.5V31a2 2 0 0 1-2 2h-1.5"/><path d="M4 31a2 2 0 0 0 2 2h1.5M18 33h11.5"/><circle cx="13" cy="33.5" r="4"/><circle cx="35" cy="33.5" r="4"/></svg>',
+  swap: '<svg class="i" viewBox="0 0 24 24"><path d="M8 4v16M8 4 4.5 7.5M8 4l3.5 3.5M16 20V4M16 20l-3.5-3.5M16 20l3.5-3.5"/></svg>',
+  pump: '<svg class="i" viewBox="0 0 24 24"><path d="M4.5 21V5.5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2V21M3 21h13M7.5 8.5h4"/><path d="M14.5 11h1.8a1.7 1.7 0 0 1 1.7 1.7V16a1.5 1.5 0 0 0 3 0V8.6L18.3 6"/></svg>',
+  left: '<svg class="i" viewBox="0 0 24 24"><path d="m14.5 5-7 7 7 7"/></svg>',
+  right: '<svg class="i" viewBox="0 0 24 24"><path d="m9.5 5 7 7-7 7"/></svg>',
+  geo: '<svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/><circle cx="12" cy="12" r="7"/></svg>',
+  toll: '<svg class="i" viewBox="0 0 24 24"><path d="M4 20V8l8-4 8 4v12"/><path d="M9 20v-6h6v6M4 20h16"/></svg>'
+};
+
+const state = {
+  profile: null, trips: [], fuel: [],
+  view: 'week', week: null, editId: null, editFuelId: null, draft: null, fuelDraft: null, form: null,
+  dashPeriod: 'week', ob: null, pf: null, loaded: false, error: null
+};
+let charts = [];
+
+/* ---------- даты ---------- */
+const pad = n => String(n).padStart(2, '0');
+const MG = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+const MN = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const MS = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+const DOW = ['вс','пн','вт','ср','чт','пт','сб'];
+const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+function toISO(d){ return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate()); }
+function parseISO(s){ const [y,m,d] = s.split('-').map(Number); return new Date(Date.UTC(y, m-1, d)); }
+function addDays(s, n){ const d = parseISO(s); d.setUTCDate(d.getUTCDate()+n); return toISO(d); }
+function weekKey(s){ const d = parseISO(s); d.setUTCDate(d.getUTCDate() - (d.getUTCDay()+6)%7); return toISO(d); }
+function todayISO(){ const d = new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+function curWeek(){ return weekKey(todayISO()); }
+function weekLabel(w){
+  const a = parseISO(w), b = parseISO(addDays(w, 6));
+  const yr = b.getUTCFullYear() !== new Date().getFullYear() ? ' ' + b.getUTCFullYear() : '';
+  if (a.getUTCMonth() === b.getUTCMonth()) return `${a.getUTCDate()}–${b.getUTCDate()} ${MG[b.getUTCMonth()]}${yr}`;
+  return `${a.getUTCDate()} ${MG[a.getUTCMonth()]} – ${b.getUTCDate()} ${MG[b.getUTCMonth()]}${yr}`;
+}
+
+/* ---------- числа ---------- */
+const fmt0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+const fmt1 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const fmt2 = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function money(v){ v = +v || 0; return (v < 0 ? '−$' : '$') + fmt0.format(Math.abs(Math.round(v))); }
+function money2(v){ v = +v || 0; return (v < 0 ? '−$' : '$') + fmt2.format(Math.abs(v)); }
+function moneyShort(v){ v = +v || 0; const a = Math.abs(v), s = v < 0 ? '−$' : '$';
+  return a >= 1000 ? s + (a/1000).toFixed(a >= 10000 ? 0 : 1) + 'k' : s + Math.round(a); }
+function num(v){ return fmt0.format(+v || 0); }
+function round2(x){ return Math.round((+x || 0) * 100) / 100; }
+function round3(x){ return Math.round((+x || 0) * 1000) / 1000; }
+function sum(arr, k){ return arr.reduce((a, t) => a + (+t[k] || 0), 0); }
+function parseNum(v){
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  let s = String(v == null ? '' : v).trim().replace(/\s/g, '').replace(/\$/g, '');
+  if (s.includes(',') && s.includes('.')) s = s.replace(/,/g, '');
+  else if (/,\d{3}$/.test(s)) s = s.replace(/,/g, '');
+  else s = s.replace(',', '.');
+  const x = parseFloat(s); return isFinite(x) ? x : 0;
+}
+function plural(n, f){ const a = n % 100, b = n % 10;
+  return f[(a > 10 && a < 20) ? 2 : b === 1 ? 0 : (b >= 2 && b <= 4) ? 1 : 2]; }
+const TRIPS_WORD = ['рейс','рейса','рейсов'];
+const FILLS_WORD = ['заправка','заправки','заправок'];
+const CO_WORD = ['догруз','догруза','догрузов'];
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ---------- расчёты (те же формулы, что в Apps Script) ----------
+   rate      — ставка основного груза; догрузы — в t.extras
+   totalRate — основной груз + все догрузы; $/mile считается по ней
+   Мили догруза не добавляются, кроме доп. миль на заезд за ним (они гружёные).
+   pay  — что водитель получает за рейс до своих расходов (включая stop pay)
+   earn — pay минус tolls, прочее и lumper, оплаченные водителем */
+function extrasSum(t){
+  const x = t.extras || [];
+  return { n: x.length, rate: sum(x, 'rate'), miles: sum(x, 'extraMiles'), stop: sum(x, 'stopPay'), lumper: sum(x, 'lumper') };
+}
+function basePay(pr, rate, loaded, empty, ex){
+  if (pr.payType === 'mile') {
+    let p = loaded * (+pr.cpm || 0) + empty * (+pr.emptyCpm || 0);
+    if (ex.n && pr.coPay === 'flat') p += ex.n * (+pr.coValue || 0);
+    if (ex.n && pr.coPay === 'percent') p += ex.rate * (+pr.coValue || 0) / 100;
+    return p;
+  }
+  if (pr.payType === 'owner') return rate * (1 - ((+pr.dispatch || 0) + (+pr.factoring || 0)) / 100);
+  return rate * (+pr.percent || 0) / 100;
+}
+function calcTrip(t, pr){
+  const ex = extrasSum(t), main = +t.rate || 0, totalRate = main + ex.rate;
+  const loaded = (+t.miles || 0) + ex.miles, empty = +t.deadhead || 0, total = loaded + empty;
+  const pay = basePay(pr, totalRate, loaded, empty, ex) + ex.stop;
+  const payMain = basePay(pr, main, +t.miles || 0, empty, { n: 0, rate: 0 });
+  const own = (+t.tolls || 0) + (+t.other || 0) + ex.lumper;
+  return { extrasCount: ex.n, extrasRate: round2(ex.rate), totalRate: round2(totalRate), extraMiles: ex.miles,
+    stopPay: round2(ex.stop), lumper: round2(ex.lumper), totalMiles: total,
+    pay: round2(pay), earn: round2(pay - own), coEarn: ex.n ? round2(pay - payMain - ex.lumper) : 0,
+    rpm: loaded ? round2(totalRate / loaded) : 0, rpmTotal: total ? round2(totalRate / total) : 0 };
+}
+function payExplain(t, pr){
+  const parts = [];
+  if (pr.payType === 'mile') {
+    parts.push(`${num(+t.miles + (+t.extraMiles || 0))} × ${money2(pr.cpm)}`);
+    if (+t.deadhead) parts.push(`${num(t.deadhead)} пуст. × ${money2(pr.emptyCpm)}`);
+    if (t.extrasCount && pr.coPay === 'flat') parts.push(`${t.extrasCount} ${plural(t.extrasCount, CO_WORD)} × ${money(pr.coValue)}`);
+    if (t.extrasCount && pr.coPay === 'percent') parts.push(`${+pr.coValue || 0}% от догрузов`);
+  } else if (pr.payType === 'owner') parts.push(`ставка ${money(t.totalRate)} − диспетч ${+pr.dispatch || 0}% − факторинг ${+pr.factoring || 0}%`);
+  else parts.push(`${+pr.percent || 0}% от ${money(t.totalRate)}`);
+  if (+t.stopPay) parts.push(`stop pay ${money(t.stopPay)}`);
+  return parts.join(' + ');
+}
+function prepExtra(x){
+  const str = v => String(v == null ? '' : v).trim();
+  return { id: x.id ? String(x.id) : '', customer: str(x.customer), cargo: str(x.cargo), rate: parseNum(x.rate),
+    extraMiles: parseNum(x.extraMiles), stopPay: parseNum(x.stopPay), lumper: parseNum(x.lumper) };
+}
+function prepTrip(p, pr){
+  const str = v => String(v == null ? '' : v).trim();
+  const t = { id: p.id ? String(p.id) : '', date: str(p.date).slice(0, 10),
+    from: str(p.from), to: str(p.to), customer: str(p.customer), truck: str(p.truck), cargo: str(p.cargo),
+    miles: parseNum(p.miles), deadhead: parseNum(p.deadhead), rate: parseNum(p.rate),
+    tolls: parseNum(p.tolls), other: parseNum(p.other),
+    extras: (p.extras || []).map(prepExtra).filter(x => x.rate || x.customer || x.cargo || x.extraMiles || x.stopPay || x.lumper) };
+  t.week = ISO_RE.test(t.date) ? weekKey(t.date) : '';
+  return Object.assign(t, calcTrip(t, pr));
+}
+function prepFuel(p){
+  const str = v => String(v == null ? '' : v).trim();
+  const f = { id: p.id ? String(p.id) : '', date: str(p.date).slice(0, 10),
+    amount: parseNum(p.amount), gallons: parseNum(p.gallons), location: str(p.location) };
+  f.week = ISO_RE.test(f.date) ? weekKey(f.date) : '';
+  f.ppg = f.gallons ? round3(f.amount / f.gallons) : 0;
+  return f;
+}
+function newId(p){ return (p || 't') + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+/* ---------- производные данные ---------- */
+function prof(){ return state.profile || DEFAULT_PROFILE; }
+function sortByDate(a){ return a.slice().sort((x, y) => (y.date + (y.createdAt || '')).localeCompare(x.date + (x.createdAt || ''))); }
+function tripsOfWeek(w){ return sortByDate(state.trips.filter(t => t.week === w)); }
+function fuelOfWeek(w){ return sortByDate(state.fuel.filter(f => f.week === w)); }
+function loadedOf(t){ return (+t.miles || 0) + (+t.extraMiles || 0); }
+function statsFor(ts, fs, weeks){
+  const pr = prof();
+  const gross = sum(ts, 'pay'), own = sum(ts, 'tolls') + sum(ts, 'other') + sum(ts, 'lumper');
+  const fuelAmt = sum(fs, 'amount'), gallons = sum(fs, 'gallons');
+  const fuelCounted = pr.paysFuel ? fuelAmt : 0;
+  const deductions = weeks.length * (+pr.weekly || 0);
+  const expenses = own + fuelCounted + deductions, net = gross - expenses;
+  const miles = ts.reduce((a, t) => a + loadedOf(t), 0), deadhead = sum(ts, 'deadhead'), total = miles + deadhead, revenue = sum(ts, 'totalRate');
+  const co = ts.filter(t => t.extrasCount > 0);
+  return { n: ts.length, nFuel: fs.length, gross, own, fuelAmt, fuelCounted, gallons, deductions, expenses, net,
+    miles, deadhead, total, revenue,
+    coTrips: co.length, coLoads: sum(ts, 'extrasCount'), coRate: sum(ts, 'extrasRate'), coEarn: sum(ts, 'coEarn'),
+    rpm: miles ? revenue / miles : 0, perMile: total ? net / total : 0,
+    emptyPct: total ? Math.round(deadhead / total * 100) : 0,
+    ppg: gallons ? fuelAmt / gallons : 0, mpg: gallons ? total / gallons : 0 };
+}
+function weekStats(w){ const ts = tripsOfWeek(w); return statsFor(ts, fuelOfWeek(w), ts.length ? [w] : []); }
+function rangeStats(r){
+  const ts = state.trips.filter(t => t.date >= r.start && t.date <= r.end);
+  const fs = state.fuel.filter(f => f.date >= r.start && f.date <= r.end);
+  const weeks = [...new Set(state.trips.map(t => t.week))].filter(w => w >= r.start && w <= r.end);
+  return { ts, st: statsFor(ts, fs, weeks) };
+}
+/* MPG с догрузом и без. Метод «полный бак»: каждая заправка покрывает мили рейсов
+   с загрузкой после предыдущей заправки и до неё включительно. Отрезок считается
+   «с догрузом», если не меньше половины его гружёных миль ехали с догрузом. */
+function mpgSplit(start, end){
+  const byDate = {};
+  state.fuel.forEach(f => { byDate[f.date] = (byDate[f.date] || 0) + (+f.gallons || 0); });
+  const dates = Object.keys(byDate).sort();
+  const acc = { s: { mi: 0, gal: 0, n: 0 }, d: { mi: 0, gal: 0, n: 0 } };
+  for (let i = 1; i < dates.length; i++) {
+    const a = dates[i - 1], b = dates[i];
+    if (b < start || b > end) continue;
+    const ts = state.trips.filter(t => t.date > a && t.date <= b);
+    if (!ts.length) continue;
+    const loaded = ts.reduce((x, t) => x + loadedOf(t), 0);
+    const coLoaded = ts.filter(t => t.extrasCount > 0).reduce((x, t) => x + loadedOf(t), 0);
+    const k = loaded && coLoaded / loaded >= 0.5 ? 'd' : 's';
+    acc[k].mi += sum(ts, 'totalMiles'); acc[k].gal += byDate[b]; acc[k].n++;
+  }
+  return { single: acc.s.gal ? acc.s.mi / acc.s.gal : 0, double: acc.d.gal ? acc.d.mi / acc.d.gal : 0, s: acc.s, d: acc.d };
+}
+function uniq(k){ return [...new Set(state.trips.map(t => t[k]).filter(Boolean))].sort(); }
+function uniqExtra(k){ const a = []; state.trips.forEach(t => (t.extras || []).forEach(x => x[k] && a.push(x[k]))); return a; }
+function avgPpg(){
+  const fs = sortByDate(state.fuel).slice(0, 5), g = sum(fs, 'gallons');
+  return g ? round2(sum(fs, 'amount') / g) : 3.8;
+}
+
+/* ---------- данные: Google Sheets или демо ---------- */
+async function api(action, payload){
+  if (DEMO) return localApi(action, payload);
+  const res = await fetch(CONFIG.API_URL, {
+    method: 'POST',
+    body: JSON.stringify({ action, payload: payload || {}, initData: (tg && tg.initData) || '' })
+  });
+  let j;
+  try { j = await res.json(); } catch (e) { throw new Error('Таблица ответила не тем форматом. Проверьте URL и публикацию скрипта.'); }
+  if (!j.ok) throw new Error(j.error || 'Ошибка сервера');
+  return j.data;
+}
+const LS_KEY = 'trucking_driver_v3';
+function lsLoad(){
+  try { const raw = localStorage.getItem(LS_KEY); if (raw) return JSON.parse(raw); } catch (e) {}
+  return { profile: null, trips: [], fuel: [] };
+}
+function lsSave(db){ try { localStorage.setItem(LS_KEY, JSON.stringify(db)); } catch (e) {} }
+async function localApi(action, p){
+  let db = lsLoad();
+  const upsert = (arr, item, prefix) => {
+    const i = arr.findIndex(x => x.id === item.id);
+    if (i >= 0) { item.createdAt = arr[i].createdAt; arr[i] = item; }
+    else { item.id = newId(prefix); item.createdAt = new Date().toISOString(); arr.push(item); }
+    if (item.extras) item.extras.forEach((x, k) => x.id = item.id + '_x' + k);
+  };
+  if (action === 'saveProfile') db.profile = normProfile(p);
+  else if (action === 'saveTrip') { if (!db.profile) throw new Error('Сначала заполните профиль'); upsert(db.trips, prepTrip(p, normProfile(db.profile)), 't'); }
+  else if (action === 'deleteTrip') db.trips = db.trips.filter(x => x.id !== p.id);
+  else if (action === 'saveFuel') upsert(db.fuel, prepFuel(p), 'f');
+  else if (action === 'deleteFuel') db.fuel = db.fuel.filter(x => x.id !== p.id);
+  else if (action === 'seedDemo') Object.assign(db, seedData((db.profile && db.profile.name) || 'Водитель'));
+  else if (action === 'resetDemo') db = { profile: null, trips: [], fuel: [] };
+  lsSave(db);
+  return JSON.parse(JSON.stringify(db));
+}
+function normProfile(p){
+  const pr = Object.assign({}, DEFAULT_PROFILE);
+  pr.name = String(p.name || '').trim();
+  pr.payType = PAY[p.payType] ? p.payType : 'percent';
+  pr.coPay = CO_PAY[p.coPay] ? p.coPay : 'none';
+  NUM_KEYS.forEach(k => { if (p[k] !== undefined && p[k] !== '') pr[k] = parseNum(p[k]); });
+  pr.paysFuel = p.paysFuel === true || p.paysFuel === 'true';
+  return pr;
+}
+
+/* Пример: те же рейсы, догрузы и заправки, что в файле «Пример_таблицы_6_недель.xlsx» */
+const SAMPLE = {"profile":{"payType":"mile","cpm":0.65,"emptyCpm":0.5,"percent":0,"dispatch":0,"factoring":0,"coPay":"flat","coValue":100,"paysFuel":false,"weekly":0,"mpgEmpty":7.5,"mpgLoaded":6.5,"mpgDouble":5.8,"tollRate":0.4},"trips":[{"id":"demo_t1","date":"2026-10-12","from":"Chicago, IL","to":"Nashville, TN","customer":"Arrive Logistics","truck":"Truck 214","cargo":"Стройматериалы","miles":411,"deadhead":74,"rate":900,"tolls":0,"other":0,"extras":[]},{"id":"demo_t2","date":"2026-10-14","from":"Nashville, TN","to":"Oklahoma City, OK","customer":"C.H. Robinson","truck":"Truck 214","cargo":"Продукты","miles":713,"deadhead":0,"rate":1750,"tolls":0,"other":28,"extras":[]},{"id":"demo_t3","date":"2026-10-15","from":"Oklahoma City, OK","to":"Little Rock, AR","customer":"TQL","truck":"Truck 214","cargo":"Напитки","miles":511,"deadhead":107,"rate":725,"tolls":0,"other":0,"extras":[{"customer":"Arrive Logistics","cargo":"Продукты","rate":275,"extraMiles":25,"stopPay":50,"lumper":75}]},{"id":"demo_t4","date":"2026-10-16","from":"Little Rock, AR","to":"Columbus, OH","customer":"C.H. Robinson","truck":"Truck 214","cargo":"Бытовая химия","miles":844,"deadhead":0,"rate":1850,"tolls":0,"other":0,"extras":[]},{"id":"demo_t5","date":"2026-10-17","from":"Columbus, OH","to":"Nashville, TN","customer":"C.H. Robinson","truck":"Truck 214","cargo":"Продукты","miles":610,"deadhead":41,"rate":1600,"tolls":0,"other":0,"extras":[]},{"id":"demo_t6","date":"2026-10-19","from":"Nashville, TN","to":"Birmingham, AL","customer":"C.H. Robinson","truck":"Truck 214","cargo":"Напитки","miles":526,"deadhead":43,"rate":1250,"tolls":0,"other":0,"extras":[]},{"id":"demo_t7","date":"2026-10-20","from":"Birmingham, AL","to":"Columbus, OH","customer":"TQL","truck":"Truck 214","cargo":"Бумага","miles":328,"deadhead":39,"rate":800,"tolls":0,"other":38,"extras":[]},{"id":"demo_t8","date":"2026-10-21","from":"Columbus, OH","to":"Little Rock, AR","customer":"Coyote Logistics","truck":"Truck 214","cargo":"Сухой груз","miles":752,"deadhead":0,"rate":975,"tolls":29,"other":0,"extras":[{"customer":"Arrive Logistics","cargo":"Напитки","rate":575,"extraMiles":23,"stopPay":50,"lumper":75}]},{"id":"demo_t9","date":"2026-10-23","from":"Little Rock, AR","to":"Dallas, TX","customer":"Coyote Logistics","truck":"Truck 214","cargo":"Продукты","miles":852,"deadhead":0,"rate":2225,"tolls":0,"other":0,"extras":[]},{"id":"demo_t10","date":"2026-10-26","from":"Dallas, TX","to":"Oklahoma City, OK","customer":"Uber Freight","truck":"Truck 214","cargo":"Сухой груз","miles":723,"deadhead":19,"rate":1450,"tolls":0,"other":0,"extras":[]},{"id":"demo_t11","date":"2026-10-27","from":"Oklahoma City, OK","to":"Birmingham, AL","customer":"Arrive Logistics","truck":"Truck 214","cargo":"Продукты","miles":872,"deadhead":61,"rate":1825,"tolls":0,"other":0,"extras":[]},{"id":"demo_t12","date":"2026-10-28","from":"Birmingham, AL","to":"Kansas City, MO","customer":"Coyote Logistics","truck":"Truck 214","cargo":"Продукты","miles":488,"deadhead":62,"rate":1000,"tolls":0,"other":0,"extras":[]},{"id":"demo_t13","date":"2026-10-30","from":"Kansas City, MO","to":"Indianapolis, IN","customer":"C.H. Robinson","truck":"Truck 214","cargo":"Напитки","miles":588,"deadhead":100,"rate":925,"tolls":0,"other":0,"extras":[{"customer":"Echo Global","cargo":"Бытовая химия","rate":425,"extraMiles":24,"stopPay":50,"lumper":75},{"customer":"Coyote Logistics","cargo":"Бытовая химия","rate":325,"extraMiles":9,"stopPay":50,"lumper":0}]},{"id":"demo_t14","date":"2026-11-02","from":"Indianapolis, IN","to":"St. Louis, MO","customer":"TQL","truck":"Truck 214","cargo":"Стройматериалы","miles":848,"deadhead":90,"rate":2250,"tolls":0,"other":0,"extras":[]},{"id":"demo_t15","date":"2026-11-06","from":"St. Louis, MO","to":"Birmingham, AL","customer":"Arrive Logistics","truck":"Truck 214","cargo":"Напитки","miles":399,"deadhead":0,"rate":825,"tolls":0,"other":0,"extras":[]},{"id":"demo_t16","date":"2026-11-07","from":"Birmingham, AL","to":"Memphis, TN","customer":"Arrive Logistics","truck":"Truck 214","cargo":"Продукты","miles":538,"deadhead":0,"rate":1125,"tolls":38,"other":0,"extras":[]},{"id":"demo_t17","date":"2026-11-11","from":"Memphis, TN","to":"Charlotte, NC","customer":"Coyote Logistics","truck":"Truck 214","cargo":"Сухой груз","miles":578,"deadhead":23,"rate":1300,"tolls":22,"other":21,"extras":[]},{"id":"demo_t18","date":"2026-11-12","from":"Charlotte, NC","to":"Atlanta, GA","customer":"Echo Global","truck":"Truck 214","cargo":"Бумага","miles":810,"deadhead":103,"rate":1225,"tolls":0,"other":0,"extras":[{"customer":"Echo Global","cargo":"Стройматериалы","rate":575,"extraMiles":0,"stopPay":0,"lumper":0}]},{"id":"demo_t19","date":"2026-11-13","from":"Atlanta, GA","to":"Birmingham, AL","customer":"Uber Freight","truck":"Truck 214","cargo":"Стройматериалы","miles":885,"deadhead":24,"rate":1925,"tolls":0,"other":0,"extras":[]},{"id":"demo_t20","date":"2026-11-16","from":"Birmingham, AL","to":"St. Louis, MO","customer":"Uber Freight","truck":"Truck 214","cargo":"Бытовая химия","miles":674,"deadhead":74,"rate":1525,"tolls":0,"other":0,"extras":[]},{"id":"demo_t21","date":"2026-11-17","from":"St. Louis, MO","to":"Columbus, OH","customer":"Arrive Logistics","truck":"Truck 214","cargo":"Бумага","miles":645,"deadhead":0,"rate":1700,"tolls":0,"other":0,"extras":[]},{"id":"demo_t22","date":"2026-11-19","from":"Columbus, OH","to":"Chicago, IL","customer":"Uber Freight","truck":"Truck 214","cargo":"Стройматериалы","miles":710,"deadhead":34,"rate":1475,"tolls":14,"other":0,"extras":[]},{"id":"demo_t23","date":"2026-11-20","from":"Chicago, IL","to":"Kansas City, MO","customer":"Echo Global","truck":"Truck 214","cargo":"Бытовая химия","miles":359,"deadhead":94,"rate":575,"tolls":0,"other":0,"extras":[{"customer":"TQL","cargo":"Сухой груз","rate":250,"extraMiles":26,"stopPay":50,"lumper":75}]},{"id":"demo_t24","date":"2026-11-21","from":"Kansas City, MO","to":"St. Louis, MO","customer":"C.H. Robinson","truck":"Truck 214","cargo":"Стройматериалы","miles":428,"deadhead":21,"rate":1050,"tolls":0,"other":0,"extras":[]},{"id":"demo_t25","date":"2026-11-23","from":"St. Louis, MO","to":"Memphis, TN","customer":"Uber Freight","truck":"Truck 214","cargo":"Напитки","miles":817,"deadhead":95,"rate":2150,"tolls":0,"other":0,"extras":[]}],"fuel":[{"id":"demo_f0","date":"2026-10-14","amount":677.13,"gallons":177.84,"location":"TA, OK"},{"id":"demo_f1","date":"2026-10-16","amount":862.3,"gallons":235.38,"location":"Love's, OH"},{"id":"demo_f2","date":"2026-10-19","amount":718.34,"gallons":185.25,"location":"Pilot, AL"},{"id":"demo_f3","date":"2026-10-21","amount":661.16,"gallons":183.79,"location":"TA, AR"},{"id":"demo_f4","date":"2026-10-23","amount":477.09,"gallons":131.3,"location":"TA, TX"},{"id":"demo_f5","date":"2026-10-27","amount":932.32,"gallons":247.07,"location":"Love's, AL"},{"id":"demo_f6","date":"2026-10-30","amount":774.4,"gallons":203.05,"location":"TA, IN"},{"id":"demo_f7","date":"2026-11-02","amount":519.39,"gallons":144.1,"location":"Pilot, MO"},{"id":"demo_f8","date":"2026-11-07","amount":541.36,"gallons":142.8,"location":"Pilot, TN"},{"id":"demo_f9","date":"2026-11-12","amount":929.09,"gallons":238.96,"location":"Flying J, GA"},{"id":"demo_f10","date":"2026-11-13","amount":509.28,"gallons":139.71,"location":"Petro, AL"},{"id":"demo_f11","date":"2026-11-17","amount":827.99,"gallons":211.31,"location":"Pilot, OH"},{"id":"demo_f12","date":"2026-11-20","amount":693.2,"gallons":190.48,"location":"Petro, MO"},{"id":"demo_f13","date":"2026-11-23","amount":785.4,"gallons":199.75,"location":"Pilot, TN"}]};
+function seedData(name){
+  const pr = normProfile(Object.assign({}, SAMPLE.profile, { name }));
+  const trips = SAMPLE.trips.map((x, i) => {
+    const t = Object.assign(prepTrip(x, pr), { id: x.id, createdAt: x.date + 'T18:00:' + pad(i % 60) + 'Z' });
+    t.extras.forEach((e, k) => e.id = x.id + '_x' + k);
+    return t;
+  });
+  const fuel = SAMPLE.fuel.map((x, i) => Object.assign(prepFuel(x), { id: x.id, createdAt: x.date + 'T20:00:00Z' }));
+  return { trips, fuel, profile: pr };
+}
+
+/* ---------- Telegram и тема ---------- */
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function isDark(){ return document.documentElement.dataset.theme === 'dark'; }
+function applyTheme(){
+  const dark = IN_TG ? tg.colorScheme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  try {
+    if (IN_TG && tg.isVersionAtLeast('6.9')) {
+      tg.setHeaderColor(cssVar('--bg')); tg.setBackgroundColor(cssVar('--bg'));
+      if (tg.isVersionAtLeast('7.10') && tg.setBottomBarColor) tg.setBottomBarColor(cssVar('--surface'));
+    }
+  } catch (e) {}
+}
+function haptic(type){ try { tg.HapticFeedback.notificationOccurred(type); } catch (e) {} }
+function tap(){ try { tg.HapticFeedback.selectionChanged(); } catch (e) {} }
+function ask(msg){
+  return new Promise(res => {
+    try { if (IN_TG && tg.isVersionAtLeast('6.2')) { tg.showConfirm(msg, ok => res(!!ok)); return; } } catch (e) {}
+    res(window.confirm(msg));
+  });
+}
+let toastTimer;
+function toast(msg, isErr){
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = 'show' + (isErr ? ' err' : '');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.className = '', isErr ? 4000 : 2200);
+}
+
+/* ---------- навигация ---------- */
+function setHead(title, sub){ document.getElementById('title').textContent = title; document.getElementById('subtitle').textContent = sub || ''; }
+function go(view){ state.view = view; state.form = null; render(); window.scrollTo(0, 0); syncBack(); }
+function syncBack(){
+  if (!IN_TG || !tg.BackButton) return;
+  const show = (state.view === 'add' && state.editId) || state.view === 'fuelform' || state.view === 'profile';
+  try { show ? tg.BackButton.show() : tg.BackButton.hide(); } catch (e) {}
+}
+function render(){
+  charts.forEach(c => c.destroy()); charts = [];
+  if (mapObj) { try { mapObj.remove(); } catch (e) {} mapObj = null; mapLayer = null; }
+  const onboarding = state.loaded && !state.error && !state.profile;
+  document.body.classList.toggle('ob', onboarding);
+  const tabView = state.view === 'fuelform' ? 'fuel' : state.view;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.view === tabView && !(state.view === 'add' && state.editId)));
+  const av = document.getElementById('avatar');
+  av.textContent = ((state.profile && state.profile.name) || '?').trim().charAt(0).toUpperCase() || '?';
+  av.classList.toggle('on', state.view === 'profile');
+  if (!state.loaded) { setHead('Учёт рейсов', ''); main.innerHTML = '<p class="hint center">Загрузка…</p>'; return; }
+  if (state.error) {
+    setHead('Нет связи с таблицей', '');
+    main.innerHTML = `<div class="card"><p style="margin:0">${esc(state.error)}</p><button class="btn" data-act="retry">Повторить</button></div>`;
+    return;
+  }
+  if (onboarding) { renderOnboarding(); return; }
+  ({ week: renderWeek, map: renderMap, fuel: renderFuel, add: renderForm, fuelform: renderFuelForm, dash: renderDash, profile: renderProfile })[state.view]();
+}
+
+/* ---------- общие блоки ---------- */
+function weekNav(){
+  const w = state.week, cur = curWeek();
+  const sub = w === cur ? '<small class="cur">текущая неделя</small>' : '<small><a data-act="wk-today">к текущей неделе</a></small>';
+  return `<div class="weeknav">
+    <button data-act="wk-prev" aria-label="Предыдущая неделя">${I.left}</button>
+    <div><b>${weekLabel(w)}</b>${sub}</div>
+    <button data-act="wk-next" aria-label="Следующая неделя" ${w >= cur ? 'disabled' : ''}>${I.right}</button>
+  </div>`;
+}
+function signBlock(st, label){
+  const kpi = (l, v) => `<div><small>${l}</small><b>${v}</b></div>`;
+  const parts = [];
+  if (st.own) parts.push(`tolls, lumper и прочее ${money(st.own)}`);
+  if (st.fuelCounted) parts.push(`топливо ${money(st.fuelCounted)}`);
+  if (st.deductions) parts.push(`вычеты ${money(st.deductions)}`);
+  const co = st.coTrips ? `<br>С догрузом: ${st.coTrips} ${plural(st.coTrips, TRIPS_WORD)}, вам за догрузы ${money(st.coEarn)}` : '';
+  return `<div class="sign"><div class="sign-in">
+    <div class="sign-label">${label}${st.net < 0 ? '<span class="loss">в минусе</span>' : ''}</div>
+    <div class="sign-num">${money(st.net)}</div>
+    <div class="sign-kpis">
+      ${kpi('Заработок', money(st.gross))}${kpi('Расходы', money(st.expenses))}${kpi('Чистыми/миля', money2(st.perMile))}
+      ${kpi('Мили', num(st.total))}${kpi('$/mile рейсов', money2(st.rpm))}${kpi('Пустые', st.emptyPct + '%')}
+    </div>
+    <div class="sign-note">${st.n} ${plural(st.n, TRIPS_WORD)}, ${num(st.miles)} гружёных и ${num(st.deadhead)} пустых миль${co}${parts.length ? '<br>Расходы: ' + parts.join(', ') : ''}</div>
+  </div></div>`;
+}
+function fuelCard(st){
+  const stats = st.gallons
+    ? `<div class="fuel-stats"><span><b>${fmt1.format(st.gallons)}</b> gal</span><span><b>${money2(st.ppg)}</b>/gal</span>${st.total ? `<span>MPG <b>${fmt1.format(st.mpg)}</b></span>` : ''}</div>`
+    : '<div class="fuel-stats">Заправок пока нет</div>';
+  return `<div class="fuel-card" role="button" tabindex="0" data-act="go" data-view="fuel">
+    <div class="fuel-ico">${I.pump}</div>
+    <div class="fuel-main"><small>Топливо${prof().paysFuel ? '' : '<span class="tag">платит компания</span>'}</small><b>${money(st.fuelAmt)}</b>${stats}</div>
+    <button class="add-mini" data-act="add-fuel">+ Заправка</button>
+  </div>`;
+}
+function dtile(date){ const d = parseISO(date); return `<div class="dtile"><b>${d.getUTCDate()}</b><span>${DOW[d.getUTCDay()]}</span></div>`; }
+function tripCard(t){
+  const own = (+t.tolls || 0) + (+t.other || 0) + (+t.lumper || 0);
+  const co = t.extrasCount ? `<span class="chip co">+${t.extrasCount} ${plural(t.extrasCount, CO_WORD)}</span>` : '';
+  return `<div class="trip" role="button" tabindex="0" data-act="edit-trip" data-id="${esc(t.id)}">
+    ${dtile(t.date)}
+    <div class="trip-main">
+      <div class="route"><span class="city">${esc(t.from)}</span><span class="road" aria-hidden="true"></span><span class="city">${esc(t.to)}</span></div>
+      <div class="meta">${co}${t.customer ? `<span>${esc(t.customer)}</span>` : ''}${t.truck ? `<span class="chip">${esc(t.truck)}</span>` : ''}${t.cargo ? `<span>${esc(t.cargo)}</span>` : ''}</div>
+      <div class="trip-nums">
+        <div><small>Ставка</small><b>${money(t.totalRate)}</b>${t.extrasCount ? `<em class="co">${money(t.rate)} + ${money(t.extrasRate)}</em>` : ''}</div>
+        <div><small>Мили</small><b>${num(loadedOf(t))}</b>${+t.deadhead ? `<em>+${num(t.deadhead)} пуст.</em>` : ''}</div>
+        <div><small>$/mile</small><b>${money2(t.rpm)}</b>${+t.deadhead ? `<em>${money2(t.rpmTotal)} всего</em>` : ''}</div>
+        <div><small>Вам</small><b class="${t.earn < 0 ? 'neg' : 'pos'}">${money(t.earn)}</b>${own ? `<em>−${money(own)} расх.</em>` : ''}</div>
+      </div>
+    </div>
+  </div>`;
+}
+function fillCard(f){
+  return `<div class="fill" role="button" tabindex="0" data-act="edit-fuel" data-id="${esc(f.id)}">
+    ${dtile(f.date)}
+    <div class="trip-main">
+      <div class="fill-row"><b class="city">${esc(f.location || 'Заправка')}</b><span class="amt">${money2(f.amount)}</span></div>
+      <div class="meta"><span>${fmt1.format(f.gallons)} gal</span><span>${money2(f.ppg)}/gal</span></div>
+    </div>
+  </div>`;
+}
+function emptyBlock(text, btn){
+  return `<div class="empty">${I.truck}<p>${text}</p>${btn || '<button class="btn" data-act="go" data-view="add">Добавить рейс</button>'}</div>`;
+}
+
+/* ---------- онбординг и профиль ---------- */
+function pf(k, label, hint, o, mode){
+  return `<label class="field"><span>${label}</span><input class="input" data-field="${k}" inputmode="${mode || 'decimal'}" value="${esc(o[k])}">${hint ? `<small>${hint}</small>` : ''}</label>`;
+}
+function payFields(o){
+  if (o.payType === 'mile') {
+    const seg = `<div class="seg in">${Object.keys(CO_PAY).map(k => `<button data-act="pick-co" data-v="${k}" class="${o.coPay === k ? 'on' : ''}">${CO_PAY[k]}</button>`).join('')}</div>`;
+    const val = o.coPay === 'flat' ? pf('coValue', '$ за каждый догруз', 'Например 100', o)
+      : o.coPay === 'percent' ? pf('coValue', '% от ставки догруза', 'Например 25', o) : '';
+    return `<div class="row2">${pf('cpm', 'Гружёная миля, $', 'Например 0.65', o)}${pf('emptyCpm', 'Пустая миля, $', '0, если не платят', o)}</div>
+      <div class="divider"></div><div class="sub-label">Доплата за догруз</div>${seg}${val ? `<div style="margin-top:12px">${val}</div>` : ''}`;
+  }
+  if (o.payType === 'owner') return `<div class="row2">${pf('dispatch', 'Диспетч, %', 'Процент от ставки', o)}${pf('factoring', 'Факторинг, %', '0, если без факторинга', o)}</div>
+    <p class="hint" style="margin:12px 2px 0">Догруз целиком ваш, минус те же диспетч и факторинг.</p>`;
+  return pf('percent', 'Ваш процент от ставки, %', 'Например 30 для company driver или 88 для lease', o)
+    + '<p class="hint" style="margin:12px 2px 0">С догруза вы получаете тот же процент.</p>';
+}
+function payOptions(o){
+  return `<div class="opts">${Object.keys(PAY).map(k => `<button class="opt ${o.payType === k ? 'on' : ''}" data-act="pick-pay" data-v="${k}">
+    <i class="radio"></i><div><b>${PAY[k][0]}</b><span>${PAY[k][1]}</span></div></button>`).join('')}</div>`;
+}
+function expenseFields(o){
+  return `<label class="toggle"><div><b>Топливо оплачиваю я</b><span>Заправки будут вычитаться из вашего дохода</span></div>
+      <span class="switch"><input type="checkbox" data-field="paysFuel" ${o.paysFuel ? 'checked' : ''}><i></i></span></label>
+    <div class="divider"></div>
+    ${pf('weekly', 'Еженедельные вычеты, $', 'Страховка, лизинг трака, ELD, эскроу. 0, если нет', o)}`;
+}
+function renderOnboarding(){
+  if (!state.ob) {
+    const u = IN_TG && tg.initDataUnsafe && tg.initDataUnsafe.user;
+    state.ob = Object.assign({ step: 0 }, DEFAULT_PROFILE, { name: u ? [u.first_name, u.last_name].filter(Boolean).join(' ') : '' });
+  }
+  const o = state.ob, steps = 4;
+  const dots = `<div class="ob-steps">${Array.from({ length: steps }, (_, i) => `<i class="${i <= o.step ? 'on' : ''}"></i>`).join('')}</div>`;
+  const nav = (next, label) => o.step === 0
+    ? `<button class="btn" data-act="${next}">${label}</button>`
+    : `<div class="btn-row"><button class="btn secondary" data-act="ob-back">Назад</button><button class="btn" data-act="${next}">${label}</button></div>`;
+  let h = dots;
+  if (o.step === 0) {
+    setHead('Добро пожаловать', '');
+    h += `<div class="ob-hero">${I.truck}<p>Приложение считает, сколько вы зарабатываете чистыми за рейс, неделю и месяц.<br>Ответьте на три вопроса, это займёт минуту.</p></div>
+      <div class="card"><label class="field"><span>Как вас зовут</span><input class="input" data-field="name" value="${esc(o.name)}" placeholder="Имя"></label></div>` + nav('ob-next', 'Начать');
+  } else if (o.step === 1) {
+    setHead('Как вам платят?', 'Выберите свою схему оплаты');
+    h += payOptions(o) + nav('ob-next', 'Далее');
+  } else if (o.step === 2) {
+    setHead(PAY[o.payType][0], 'Укажите свои цифры');
+    h += `<div class="card">${payFields(o)}</div>` + nav('ob-next', 'Далее');
+  } else {
+    setHead('Ваши расходы', 'Что вы оплачиваете сами');
+    h += `<div class="card">${expenseFields(o)}</div>
+      <p class="hint">Tolls, lumper и прочие траты можно вписывать в каждом рейсе. Всё это можно поменять позже в профиле.</p>` + nav('finish-ob', 'Готово');
+  }
+  main.innerHTML = h;
+}
+function renderProfile(){
+  if (!state.pf) state.pf = Object.assign({}, prof());
+  const o = state.pf, u = IN_TG && tg.initDataUnsafe && tg.initDataUnsafe.user;
+  setHead('Профиль', o.name || '');
+  main.innerHTML = `
+    <div class="card"><label class="field"><span>Имя</span><input class="input" data-field="name" value="${esc(o.name)}"></label></div>
+    <h2 class="sec">Как вам платят</h2>
+    ${payOptions(o)}
+    <div class="card" style="margin-top:12px">${payFields(o)}</div>
+    <h2 class="sec">Ваши расходы</h2>
+    <div class="card">${expenseFields(o)}</div>
+    <h2 class="sec"><span>Расход топлива</span><small>для расчёта на карте</small></h2>
+    <div class="card">
+      <div class="row3">${pf('mpgEmpty', 'MPG пустым', '', o)}${pf('mpgLoaded', 'Гружёным', '', o)}${pf('mpgDouble', 'С догрузом', '', o)}</div>
+      ${pf('tollRate', 'Tolls для трака, $ за милю платной дороги', 'Примерно: 0.20–0.60 в зависимости от штата', o)}
+    </div>
+    <button class="btn" data-act="save-profile">Сохранить профиль</button>
+    <p class="hint">Новые ставки применяются к новым рейсам и к рейсам, которые вы отредактируете. Уже сохранённые рейсы не пересчитываются,
+      чтобы старые недели не поменялись задним числом. Топливо и еженедельные вычеты учитываются по текущему профилю.</p>
+    <h2 class="sec">Подключение</h2>
+    <div class="card">
+      <div class="status-line"><span class="dot ${DEMO ? '' : 'on'}"></span>${DEMO ? 'Демо-режим' : 'Google Таблица подключена'}</div>
+      <p class="hint" style="margin:6px 0 0">${DEMO ? 'Данные хранятся только на этом устройстве. Чтобы сохранять в таблицу, впишите API_URL в начале файла.' : 'Рейсы, догрузы и заправки сразу записываются в таблицу.'}</p>
+      ${u ? `<p class="hint" style="margin:8px 0 0">Telegram ID ${esc(u.id)}</p>` : ''}
+    </div>
+    ${DEMO ? `<button class="btn secondary" data-act="seed">Пример: водитель, 6 недель</button>
+              <button class="btn danger" data-act="reset">Очистить демо-данные</button>` : ''}`;
+}
+function validateProfile(o){
+  if (!String(o.name || '').trim()) return 'Укажите имя';
+  const n = k => parseNum(o[k]);
+  if (o.payType === 'percent' && !(n('percent') > 0 && n('percent') <= 100)) return 'Процент должен быть от 1 до 100';
+  if (o.payType === 'mile' && !(n('cpm') > 0)) return 'Укажите оплату за гружёную милю';
+  if (o.payType === 'mile' && o.coPay === 'percent' && n('coValue') > 100) return 'Процент за догруз не больше 100';
+  if (o.payType === 'owner' && n('dispatch') + n('factoring') >= 100) return 'Проверьте проценты диспетча и факторинга';
+  if (NUM_KEYS.some(k => n(k) < 0)) return 'Значения не могут быть отрицательными';
+  if (['mpgEmpty','mpgLoaded','mpgDouble'].some(k => o[k] !== undefined && o[k] !== '' && !(n(k) > 0))) return 'MPG должен быть больше нуля';
+  return '';
+}
+
+/* ---------- экран: неделя ---------- */
+function renderWeek(){
+  const w = state.week, ts = tripsOfWeek(w), st = weekStats(w);
+  setHead(w === curWeek() ? 'Эта неделя' : 'Неделя', '');
+  let h = weekNav() + signBlock(st, 'Вам чистыми за неделю') + fuelCard(st);
+  if (!ts.length) h += emptyBlock(w === curWeek() ? 'На этой неделе рейсов пока нет' : 'В эту неделю рейсов не было');
+  else h += `<h2 class="sec"><span>Рейсы</span><small>${ts.length} ${plural(ts.length, TRIPS_WORD)}</small></h2><div class="list">${ts.map(tripCard).join('')}</div>`;
+  main.innerHTML = h;
+}
+
+/* ---------- экран: топливо ---------- */
+function renderFuel(){
+  const w = state.week, fs = fuelOfWeek(w), st = weekStats(w), pr = prof();
+  setHead('Топливо', '');
+  let h = weekNav() + `<div class="fuel-sum">
+    <div class="head"><div class="fuel-ico">${I.pump}</div><div><small style="color:var(--muted);font-weight:600;font-size:13px">Потрачено за неделю</small><div class="big">${money2(st.fuelAmt)}</div></div></div>
+    <div class="grid">
+      <div><small>Галлоны</small><b>${fmt1.format(st.gallons)}</b></div>
+      <div><small>Средняя цена</small><b>${st.gallons ? money2(st.ppg) : '—'}</b></div>
+      <div><small>MPG</small><b>${st.gallons && st.total ? fmt1.format(st.mpg) : '—'}</b></div>
+    </div>
+    <div class="note">${pr.paysFuel ? 'Вычитается из вашего дохода за неделю.' : 'Топливо оплачивает компания, из дохода не вычитается.'}
+      MPG за неделю примерный: заправка не всегда приходится на ту же неделю, что и мили. Точный MPG с догрузом и без — в «Статистике».</div>
+  </div>
+  <button class="btn fuel" data-act="add-fuel">+ Добавить заправку</button>`;
+  if (fs.length) h += `<h2 class="sec"><span>Заправки</span><small>${fs.length} ${plural(fs.length, FILLS_WORD)}</small></h2><div class="list">${fs.map(fillCard).join('')}</div>`;
+  else h += '<p class="hint center" style="margin-top:20px">За эту неделю заправок нет</p>';
+  main.innerHTML = h;
+}
+
+/* ---------- экран: форма рейса ---------- */
+function dateBlock(id, val, label){
+  return `<div class="card"><div class="date-row">
+    <input class="input" id="${id}" type="date" value="${esc(val)}" aria-label="${label}">
+    <button class="pill" data-act="set-date" data-target="${id}" data-d="0">Сегодня</button>
+    <button class="pill" data-act="set-date" data-target="${id}" data-d="-1">Вчера</button>
+  </div></div>`;
+}
+const fld = (id, label, val, extra) => `<label class="field"><span>${label}</span><input class="input" id="${id}" value="${esc(val)}" ${extra || ''}></label>`;
+const xfld = (k, label, val, extra) => `<label class="field"><span>${label}</span><input class="input" data-x="${k}" value="${esc(val)}" ${extra || ''}></label>`;
+const blank = x => (x === 0 || x == null) ? '' : x;
+function extraBlock(x, i){
+  return `<div class="card extra">
+    <div class="extra-head"><b>Догруз ${i + 1}</b><button class="link-del" data-act="del-extra" data-i="${i}">Удалить</button></div>
+    ${xfld('customer', 'Заказчик', x.customer, 'list="dl_cust" autocomplete="off" placeholder="Название брокера"')}
+    <div class="row2">
+      ${xfld('cargo', 'Груз', x.cargo, 'list="dl_cargo" autocomplete="off" placeholder="Что везёте"')}
+      ${xfld('rate', 'Ставка, $', blank(x.rate), 'inputmode="decimal" placeholder="0"')}
+    </div>
+    <div class="row3">
+      ${xfld('extraMiles', 'Доп. мили', blank(x.extraMiles), 'inputmode="numeric" placeholder="0"')}
+      ${xfld('stopPay', 'Stop pay $', blank(x.stopPay), 'inputmode="decimal" placeholder="0"')}
+      ${xfld('lumper', 'Lumper $', blank(x.lumper), 'inputmode="decimal" placeholder="0"')}
+    </div>
+  </div>`;
+}
+function renderForm(){
+  const editing = state.editId ? state.trips.find(t => t.id === state.editId) : null;
+  if (state.editId && !editing) state.editId = null;
+  const last = sortByDate(state.trips)[0];
+  const t = state.form || editing || state.draft || { date: todayISO(), truck: last ? last.truck : '' };
+  const extras = t.extras || [];
+  setHead(editing ? 'Изменить рейс' : 'Новый рейс', editing ? 'Неделя ' + weekLabel(editing.week) : 'Маршрут, мили и ставка');
+  const dl = (id, arr) => `<datalist id="${id}">${[...new Set(arr)].sort().map(x => `<option value="${esc(x)}">`).join('')}</datalist>`;
+  const cities = uniq('from').concat(uniq('to'));
+  const hasExtra = +t.tolls > 0 || +t.other > 0;
+  main.innerHTML = `
+    ${dl('dl_city', cities)}${dl('dl_cust', uniq('customer').concat(uniqExtra('customer')))}${dl('dl_truck', uniq('truck'))}${dl('dl_cargo', uniq('cargo').concat(uniqExtra('cargo')))}
+    <h2 class="sec" style="margin-top:4px">Дата загрузки</h2>
+    ${dateBlock('f_date', t.date, 'Дата загрузки')}
+    <h2 class="sec">Маршрут</h2>
+    <div class="card route-edit">
+      <div>
+        ${fld('f_from', 'Откуда', t.from, 'list="dl_city" autocomplete="off" placeholder="Chicago, IL"')}
+        ${fld('f_to', 'Куда', t.to, 'list="dl_city" autocomplete="off" placeholder="Dallas, TX"')}
+      </div>
+      <button class="swap" data-act="swap" aria-label="Поменять местами">${I.swap}</button>
+    </div>
+    <h2 class="sec">Основной груз</h2>
+    <div class="card">
+      ${fld('f_customer', 'Заказчик', t.customer, 'list="dl_cust" autocomplete="off" placeholder="Название брокера"')}
+      <div class="row2">
+        ${fld('f_truck', 'Машина', t.truck, 'list="dl_truck" autocomplete="off" placeholder="Truck 101"')}
+        ${fld('f_cargo', 'Груз', t.cargo, 'list="dl_cargo" autocomplete="off" placeholder="Сухой груз"')}
+      </div>
+    </div>
+    <h2 class="sec">Мили и ставка</h2>
+    <div class="card">
+      <div class="row2">
+        ${fld('f_deadhead', 'Пустые до загрузки', blank(t.deadhead), 'inputmode="numeric" placeholder="0"')}
+        ${fld('f_miles', 'Гружёные мили', blank(t.miles), 'inputmode="numeric" placeholder="0"')}
+      </div>
+      ${fld('f_rate', 'Ставка основного груза, $', blank(t.rate), 'inputmode="decimal" placeholder="0"')}
+    </div>
+    <h2 class="sec"><span>Догрузы</span><small>в тот же прицеп, тот же маршрут</small></h2>
+    <div id="extras">${extras.map(extraBlock).join('')}</div>
+    <button class="btn co" data-act="add-extra">+ Догруз</button>
+    <div class="result" id="preview"></div>
+    <details class="card" ${hasExtra ? 'open' : ''}>
+      <summary>Мои расходы в рейсе<small>по желанию</small></summary>
+      <div class="inner"><div class="row2">
+        ${fld('f_tolls', 'Tolls, парковки $', blank(t.tolls), 'inputmode="decimal" placeholder="0"')}
+        ${fld('f_other', 'Прочее $', blank(t.other), 'inputmode="decimal" placeholder="Еда, душ…"')}
+      </div></div>
+    </details>
+    <button class="btn" data-act="save-trip">${editing ? 'Сохранить изменения' : 'Сохранить рейс'}</button>
+    ${editing ? `<button class="btn danger" data-act="delete-trip">Удалить рейс</button>
+                 <button class="btn secondary" data-act="cancel-edit">Отмена</button>`
+              : (state.draft ? `<button class="btn secondary" data-act="clear-draft">Очистить форму</button>` : '')}`;
+  updatePreview(); updatePills();
+}
+function readForm(){
+  const g = id => { const el = document.getElementById('f_' + id); return el ? el.value : ''; };
+  const extras = [...document.querySelectorAll('#extras .extra')].map(el => {
+    const x = {}; el.querySelectorAll('[data-x]').forEach(i => x[i.dataset.x] = i.value); return x;
+  });
+  return { date: g('date'), from: g('from'), to: g('to'), customer: g('customer'), truck: g('truck'), cargo: g('cargo'),
+    miles: g('miles'), deadhead: g('deadhead'), rate: g('rate'), tolls: g('tolls'), other: g('other'), extras };
+}
+function updatePills(){
+  document.querySelectorAll('[data-act="set-date"]').forEach(b => {
+    const el = document.getElementById(b.dataset.target);
+    b.classList.toggle('on', !!el && el.value === addDays(todayISO(), +b.dataset.d));
+  });
+}
+function updatePreview(){
+  const el = document.getElementById('preview');
+  if (el) {
+    const pr = prof(), t = prepTrip(readForm(), pr), own = (+t.tolls || 0) + (+t.other || 0) + (+t.lumper || 0);
+    const rateLine = t.extrasCount ? `Ставка ${money(t.totalRate)} = ${money(t.rate)} + ${t.extras.map(x => money(x.rate) + ' догруз').join(' + ')}.<br>` : '';
+    const coLine = t.extrasCount ? `<br>Догруз добавил вам ${money(t.coEarn)}` : '';
+    el.innerHTML = `
+      <div><small>$/mile гружёный</small><b>${loadedOf(t) ? money2(t.rpm) : '—'}</b></div>
+      <div><small>$/mile всего</small><b>${t.totalMiles ? money2(t.rpmTotal) : '—'}</b></div>
+      <div><small>Вам за рейс</small><b class="${t.earn < 0 ? 'neg' : 'pos'}">${money(t.earn)}</b></div>
+      <div class="breakdown">${t.totalRate || t.miles ? `${rateLine}Заработок ${money(t.pay)}: ${payExplain(t, pr)}${own ? `, минус ваши расходы ${money(own)}` : ''}${coLine}` : 'Введите мили и ставку, заработок посчитается сам'}</div>`;
+  }
+  const fp = document.getElementById('fpreview');
+  if (fp) {
+    const f = prepFuel(readFuelForm());
+    fp.innerHTML = `<div><small>Цена галлона</small><b>${f.gallons ? money2(f.ppg) : '—'}</b></div>
+      <div><small>Галлоны</small><b>${f.gallons ? fmt1.format(f.gallons) : '—'}</b></div>
+      <div><small>Сумма</small><b>${money2(f.amount)}</b></div>`;
+  }
+}
+function validate(t){
+  if (!ISO_RE.test(t.date)) return 'Укажите дату загрузки';
+  if (!t.from || !t.to) return 'Укажите, откуда и куда';
+  if (!(t.miles > 0)) return 'Укажите гружёные мили';
+  if (!(t.rate > 0)) return 'Укажите ставку основного груза';
+  if (t.deadhead < 0 || t.tolls < 0 || t.other < 0) return 'Значения не могут быть отрицательными';
+  for (let i = 0; i < t.extras.length; i++) {
+    const x = t.extras[i];
+    if (!(x.rate > 0)) return `Укажите ставку догруза ${i + 1} или удалите его`;
+    if (x.extraMiles < 0 || x.stopPay < 0 || x.lumper < 0) return 'Значения не могут быть отрицательными';
+  }
+  return '';
+}
+
+/* ---------- экран: форма заправки ---------- */
+function renderFuelForm(){
+  const editing = state.editFuelId ? state.fuel.find(f => f.id === state.editFuelId) : null;
+  if (state.editFuelId && !editing) state.editFuelId = null;
+  const def = state.week === curWeek() ? todayISO() : addDays(state.week, 6);
+  const f = editing || state.fuelDraft || { date: def };
+  setHead(editing ? 'Изменить заправку' : 'Новая заправка', '');
+  main.innerHTML = `
+    <h2 class="sec" style="margin-top:4px">Дата</h2>
+    ${dateBlock('g_date', f.date, 'Дата заправки')}
+    <h2 class="sec">Чек</h2>
+    <div class="card">
+      <div class="row2">
+        ${fld('g_amount', 'Сумма, $', blank(f.amount), 'inputmode="decimal" placeholder="0.00"')}
+        ${fld('g_gallons', 'Галлоны', blank(f.gallons), 'inputmode="decimal" placeholder="0.0"')}
+      </div>
+      ${fld('g_location', 'Где заправлялись', f.location, 'autocomplete="off" placeholder="Pilot, Memphis TN"')}
+    </div>
+    <div class="result fuelres" id="fpreview"></div>
+    <p class="hint">Заправляйтесь до полного бака, тогда MPG с догрузом и без посчитается точно.</p>
+    <button class="btn" data-act="save-fuel">${editing ? 'Сохранить изменения' : 'Сохранить заправку'}</button>
+    ${editing ? '<button class="btn danger" data-act="delete-fuel">Удалить заправку</button>' : ''}
+    <button class="btn secondary" data-act="cancel-fuel">Отмена</button>`;
+  updatePreview(); updatePills();
+}
+function readFuelForm(){
+  const g = id => { const el = document.getElementById('g_' + id); return el ? el.value : ''; };
+  return { date: g('date'), amount: g('amount'), gallons: g('gallons'), location: g('location') };
+}
+
+/* ---------- экран: карта ---------- */
+const ROUTE = { pts: { cur: null, pick: null, drop: null }, zips: { cur: '', pick: '', drop: '' }, status: {},
+  res: null, busy: false, err: '', ppg: null, seq: 0 };
+const ZIP_LABEL = { cur: 'Где я сейчас', pick: 'Загрузка', drop: 'Выгрузка' };
+let mapObj = null, mapLayer = null;
+const geoCache = {};
+async function fetchJSON(url, opts, ms){
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), ms || 12000);
+  try {
+    const r = await fetch(url, Object.assign({ signal: ctl.signal }, opts || {}));
+    let j = null; try { j = await r.json(); } catch (e) {}
+    return { ok: r.ok, status: r.status, j };
+  } finally { clearTimeout(timer); }
+}
+async function geocodeZip(zip){
+  if (geoCache[zip]) return geoCache[zip];
+  let res = null;
+  try {
+    const r = await fetchJSON(`https://api.zippopotam.us/us/${zip}`);
+    if (r.status === 404) throw new Error('notfound');
+    const p = r.ok && r.j && r.j.places && r.j.places[0];
+    if (p) res = { lat: +p.latitude, lon: +p.longitude, city: p['place name'], st: p['state abbreviation'], zip };
+  } catch (e) { if (e.message === 'notfound') throw new Error('ZIP не найден'); }
+  if (!res) {
+    const r = await fetchJSON(`https://nominatim.openstreetmap.org/search?postalcode=${zip}&countrycodes=us&format=jsonv2&addressdetails=1&limit=1`);
+    const p = r.ok && r.j && r.j[0];
+    if (!p) throw new Error('ZIP не найден');
+    const a = p.address || {};
+    res = { lat: +p.lat, lon: +p.lon, city: a.city || a.town || a.village || a.hamlet || a.county || zip,
+      st: String(a['ISO3166-2-lvl4'] || '').replace('US-', ''), zip };
+  }
+  geoCache[zip] = res;
+  return res;
+}
+async function routeOSRM(pts){
+  const c = pts.map(p => p.lon.toFixed(5) + ',' + p.lat.toFixed(5)).join(';');
+  const r = await fetchJSON(`https://router.project-osrm.org/route/v1/driving/${c}?overview=full&geometries=geojson&steps=true`, null, 20000);
+  if (!r.ok || !r.j || r.j.code !== 'Ok' || !r.j.routes || !r.j.routes[0]) throw new Error('Маршрут не найден');
+  const rt = r.j.routes[0]; let toll = 0;
+  rt.legs.forEach(l => (l.steps || []).forEach(s => {
+    if ((s.intersections || []).some(i => (i.classes || []).indexOf('toll') >= 0)) toll += s.distance;
+  }));
+  const M = 1609.344;
+  return { legs: rt.legs.map(l => l.distance / M), miles: rt.distance / M, hours: rt.duration / 3600, tollMiles: toll / M,
+    coords: rt.geometry.coordinates.map(c => [c[1], c[0]]), truck: false };
+}
+async function routeORS(pts){
+  const r = await fetchJSON('https://api.openrouteservice.org/v2/directions/driving-hgv/geojson', {
+    method: 'POST', headers: { 'Authorization': CONFIG.ORS_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ coordinates: pts.map(p => [p.lon, p.lat]), extra_info: ['tollways'], units: 'mi' })
+  }, 20000);
+  const f = r.ok && r.j && r.j.features && r.j.features[0];
+  if (!f) throw new Error('ORS');
+  const p = f.properties; let toll = 0;
+  const tw = p.extras && p.extras.tollways;
+  if (tw && tw.summary) tw.summary.forEach(s => { if (s.value === 1) toll += s.distance; });
+  return { legs: (p.segments || []).map(s => s.distance), miles: p.summary.distance, hours: p.summary.duration / 3600, tollMiles: toll,
+    coords: f.geometry.coordinates.map(c => [c[1], c[0]]), truck: true };
+}
+async function buildRoute(){
+  const P = ROUTE.pts;
+  if (!P.pick || !P.drop) { ROUTE.res = null; ROUTE.err = ''; drawMap(); updateRouteBox(); return; }
+  const pts = [P.cur, P.pick, P.drop].filter(Boolean), seq = ++ROUTE.seq;
+  ROUTE.busy = true; ROUTE.err = ''; updateRouteBox();
+  let res = null, err = '';
+  try {
+    if (CONFIG.ORS_KEY) { try { res = await routeORS(pts); } catch (e) { res = null; } }
+    if (!res) res = await routeOSRM(pts);
+  } catch (e) { err = e.name === 'AbortError' ? 'Сервис маршрутов не ответил. Проверьте интернет и попробуйте ещё раз.' : (e.message || 'Не удалось построить маршрут'); }
+  if (seq !== ROUTE.seq) return;
+  ROUTE.busy = false; ROUTE.err = err;
+  if (res) { res.emptyMi = P.cur ? res.legs[0] || 0 : 0; res.loadedMi = res.legs[res.legs.length - 1] || 0; }
+  ROUTE.res = res; drawMap(); updateRouteBox();
+}
+function cityLabel(p){ return p ? [p.city, p.st].filter(Boolean).join(', ') : ''; }
+function zipRow(k){
+  const p = ROUTE.pts[k], s = ROUTE.status[k] || '';
+  const label = s === 'busy' ? '…' : s ? s : cityLabel(p);
+  const geo = k === 'cur' ? `<button class="geo" data-act="geo" aria-label="Моё местоположение">${I.geo}</button>` : '<span class="geo ph"></span>';
+  return `<div class="zip-row"><span class="zdot ${k}"></span>
+    <div class="zip-in"><input class="input" data-zip="${k}" inputmode="numeric" maxlength="5" autocomplete="off" value="${esc(ROUTE.zips[k])}"
+      placeholder="${ZIP_LABEL[k]}${k === 'cur' ? ' (необяз.)' : ''}" aria-label="${ZIP_LABEL[k]}, ZIP"><small id="zl_${k}" class="${s && s !== 'busy' ? 'err' : ''}">${esc(label)}</small></div>
+    ${geo}</div>`;
+}
+function renderMap(){
+  setHead('Маршрут', 'Введите ZIP-коды');
+  if (ROUTE.ppg == null) ROUTE.ppg = avgPpg();
+  main.innerHTML = `
+    <div class="mapbox"><div id="map"></div></div>
+    <div class="card" style="margin-top:12px">${zipRow('cur')}${zipRow('pick')}${zipRow('drop')}</div>
+    <div id="routebox"></div>`;
+  initMap(); updateRouteBox();
+}
+function initMap(){
+  const el = document.getElementById('map');
+  if (!window.L) { el.innerHTML = '<div class="map-msg">Карта не загрузилась. Мили и топливо всё равно посчитаются.</div>'; return; }
+  mapObj = L.map(el, { zoomControl: false, attributionControl: true }).setView([39.5, -96.5], 3);
+  L.tileLayer(`https://{s}.basemaps.cartocdn.com/rastertiles/${isDark() ? 'dark_all' : 'voyager'}/{z}/{x}/{y}{r}.png`, {
+    subdomains: 'abcd', maxZoom: 18, attribution: '© OpenStreetMap contributors © CARTO' }).addTo(mapObj);
+  mapLayer = L.layerGroup().addTo(mapObj);
+  setTimeout(() => { if (mapObj) { mapObj.invalidateSize(); drawMap(); } }, 60);
+}
+function drawMap(){
+  if (!mapObj || !mapLayer) return;
+  mapLayer.clearLayers();
+  const pos = cssVar('--pos'), ink = cssVar('--ink'), muted = cssVar('--muted'), bounds = [];
+  if (ROUTE.res && ROUTE.res.coords) {
+    L.polyline(ROUTE.res.coords, { color: pos, weight: 5, opacity: .85 }).addTo(mapLayer);
+    ROUTE.res.coords.forEach(c => bounds.push(c));
+  }
+  [['cur', muted], ['pick', pos], ['drop', ink]].forEach(([k, color]) => {
+    const p = ROUTE.pts[k]; if (!p) return;
+    L.circleMarker([p.lat, p.lon], { radius: 8, color: '#fff', weight: 3, fillColor: color, fillOpacity: 1 })
+      .bindTooltip(p.city || ZIP_LABEL[k], { permanent: true, direction: 'top', offset: [0, -8], className: 'pin' }).addTo(mapLayer);
+    bounds.push([p.lat, p.lon]);
+  });
+  if (bounds.length === 1) mapObj.setView(bounds[0], 9);
+  else if (bounds.length) mapObj.fitBounds(bounds, { padding: [36, 36] });
+}
+function updateRouteBox(){
+  const box = document.getElementById('routebox'); if (!box) return;
+  const r = ROUTE.res, pr = prof();
+  if (ROUTE.busy) { box.innerHTML = '<p class="hint center" style="margin-top:16px">Строю маршрут…</p>'; return; }
+  if (ROUTE.err) { box.innerHTML = `<div class="card" style="margin-top:12px"><p style="margin:0">${esc(ROUTE.err)}</p><button class="btn" data-act="route-retry">Повторить</button></div>`; return; }
+  if (!r) {
+    box.innerHTML = `<p class="hint">Введите ZIP загрузки и выгрузки, и маршрут построится сам. Если укажете, где вы сейчас,
+      приложение посчитает и пустой ход до загрузки.</p>`;
+    return;
+  }
+  const ppg = +ROUTE.ppg || 0, em = r.emptyMi, lm = r.loadedMi;
+  const mE = +pr.mpgEmpty || 7.5, mL = +pr.mpgLoaded || 6.5, mD = +pr.mpgDouble || 5.8;
+  const cE = em / mE * ppg, cL = lm / mL * ppg, cD = lm / mD * ppg;
+  const tollCost = r.tollMiles * (+pr.tollRate || 0);
+  const toll = r.tollMiles >= 1
+    ? `<div class="toll yes">${I.toll}<div><b>Есть платные дороги</b>: около ${num(r.tollMiles)} mi, примерно ${money(tollCost)} для трака</div></div>`
+    : `<div class="toll">${I.toll}<div><b>Платных дорог нет</b> на этом маршруте</div></div>`;
+  const row = (cls, title, sub, val, sub2) => `<div class="frow ${cls}"><b>${title}</b><span class="v">${val}</span><small>${sub}</small><small class="r">${sub2 || ''}</small></div>`;
+  box.innerHTML = `
+    <div class="card" style="margin-top:12px">
+      <div class="rt-miles">
+        <div><small>Пустой ход</small><b>${em ? num(em) : '—'}</b></div>
+        <div><small>Гружёный</small><b>${num(lm)}</b></div>
+        <div><small>Всего, mi</small><b>${num(em + lm)}</b></div>
+      </div>
+      ${r.truck ? `<p class="hint" style="margin:8px 0 0">За рулём около ${fmt1.format(r.hours)} ч без остановок</p>` : ''}
+      ${toll}
+    </div>
+    <h2 class="sec"><span>Топливо на маршрут</span><small>дизель</small></h2>
+    <div class="card">
+      <label class="field"><span>Цена дизеля, $ за галлон</span><input class="input" data-ppg="1" inputmode="decimal" value="${esc(ROUTE.ppg)}"></label>
+      <div style="margin-top:4px">
+        ${em ? row('', 'Пустой ход', `${num(em)} mi ÷ ${fmt1.format(mE)} MPG`, money(cE), `${fmt1.format(em / mE)} gal`) : ''}
+        ${row('', 'Гружёный, 1 груз', `${num(lm)} mi ÷ ${fmt1.format(mL)} MPG`, money(cL + cE), em ? `с пустым ходом` : `${fmt1.format(lm / mL)} gal`)}
+        ${row('d', 'С догрузом, 2 груза', `${num(lm)} mi ÷ ${fmt1.format(mD)} MPG`, money(cD + cE), `+${money(cD - cL)} к одному грузу`)}
+      </div>
+    </div>
+    <p class="hint">${r.truck ? 'Маршрут построен для грузовика (OpenRouteService).' : 'Маршрут построен по дорогам для легковой машины: у трака путь, мили и платные дороги могут немного отличаться.'}
+      Стоимость tolls примерная (${money2(pr.tollRate)} за милю платной дороги). MPG и ставку tolls можно поменять в профиле.</p>
+    <button class="btn" data-act="route-trip">Создать рейс по маршруту</button>`;
+}
+async function onZip(el){
+  const k = el.dataset.zip, v = el.value.replace(/\D/g, '').slice(0, 5);
+  if (v !== el.value) el.value = v;
+  if (v === ROUTE.zips[k] && ROUTE.pts[k]) return;
+  ROUTE.zips[k] = v;
+  const lab = document.getElementById('zl_' + k);
+  const setLab = (txt, err) => { if (lab) { lab.textContent = txt; lab.className = err ? 'err' : ''; } };
+  if (v.length < 5) {
+    if (ROUTE.pts[k]) { ROUTE.pts[k] = null; ROUTE.status[k] = ''; setLab(''); buildRoute(); }
+    return;
+  }
+  ROUTE.status[k] = 'busy'; setLab('…');
+  try {
+    const p = await geocodeZip(v);
+    if (ROUTE.zips[k] !== v) return;
+    ROUTE.pts[k] = p; ROUTE.status[k] = ''; setLab(cityLabel(p)); tap();
+  } catch (e) {
+    if (ROUTE.zips[k] !== v) return;
+    ROUTE.pts[k] = null;
+    ROUTE.status[k] = e.name === 'AbortError' || e instanceof TypeError ? 'нет связи' : 'не найден';
+    setLab(ROUTE.status[k], true);
+  }
+  drawMap(); buildRoute();
+}
+function useMyLocation(){
+  if (!navigator.geolocation) { toast('Телефон не дал доступ к местоположению', true); return; }
+  const lab = document.getElementById('zl_cur'); if (lab) { lab.textContent = '…'; lab.className = ''; }
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const p = { lat: pos.coords.latitude, lon: pos.coords.longitude, city: 'Я здесь', st: '', zip: '' };
+    try {
+      const r = await fetchJSON(`https://nominatim.openstreetmap.org/reverse?lat=${p.lat}&lon=${p.lon}&format=jsonv2&zoom=14&addressdetails=1`, null, 8000);
+      const a = (r.j && r.j.address) || {};
+      if (a.postcode) p.zip = String(a.postcode).slice(0, 5);
+      p.city = a.city || a.town || a.village || a.county || p.city;
+      p.st = String(a['ISO3166-2-lvl4'] || '').replace('US-', '');
+    } catch (e) {}
+    ROUTE.pts.cur = p; ROUTE.zips.cur = p.zip; ROUTE.status.cur = '';
+    const inp = document.querySelector('[data-zip="cur"]'); if (inp) inp.value = p.zip;
+    const l = document.getElementById('zl_cur'); if (l) { l.textContent = cityLabel(p); l.className = ''; }
+    drawMap(); buildRoute();
+  }, () => {
+    const l = document.getElementById('zl_cur'); if (l) l.textContent = cityLabel(ROUTE.pts.cur);
+    toast('Не удалось определить местоположение. Введите ZIP вручную.', true);
+  }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 });
+}
+
+/* ---------- экран: статистика ---------- */
+function periodRange(p){
+  const today = todayISO(), y = +today.slice(0, 4), m = +today.slice(5, 7);
+  if (p === 'week') { const s = curWeek(); return { start: s, end: addDays(s, 6), label: weekLabel(s), word: 'за неделю' }; }
+  if (p === 'month') return { start: `${y}-${pad(m)}-01`, end: toISO(new Date(Date.UTC(y, m, 0))), label: `${MN[m-1]} ${y}`, word: 'за месяц' };
+  return { start: `${y}-01-01`, end: `${y}-12-31`, label: `${y} год`, word: 'за год' };
+}
+function coCard(st, r){
+  const m = mpgSplit(r.start, r.end);
+  const diff = m.single && m.double ? Math.round((1 - m.double / m.single) * 100) : null;
+  const mpg = (m.single || m.double)
+    ? `<div class="mpg-row">
+        <div class="mpg-box"><small>MPG без догруза</small><b>${m.single ? fmt1.format(m.single) : '—'}</b></div>
+        <div class="mpg-box d"><small>MPG с догрузом</small><b>${m.double ? fmt1.format(m.double) : '—'}</b></div>
+      </div>
+      <p class="hint" style="margin:10px 2px 0">${diff != null ? (diff > 0 ? `С догрузом расход выше: MPG ниже на ${diff}%.` : 'Разницы в расходе пока не видно.') + ' ' : ''}Считается по заправкам до полного бака между рейсами.</p>`
+    : `<p class="hint" style="margin:12px 2px 0">Чтобы сравнить расход с догрузом и без, нужно минимум две заправки${r.word === 'за неделю' ? ', попробуйте месяц или год' : ''}.</p>`;
+  return `<div class="card chart-card">
+    <h3>Догрузы</h3><p class="hint">${r.word}</p>
+    <div class="co-grid">
+      <div><small>С догрузом</small><b>${st.coTrips}<span style="font-size:14px;color:var(--muted);font-weight:700"> из ${st.n}</span></b></div>
+      <div><small>Ставки догрузов</small><b>${money(st.coRate)}</b></div>
+      <div><small>Вам за догрузы</small><b style="color:var(--co)">${money(st.coEarn)}</b></div>
+    </div>
+    ${mpg}
+  </div>`;
+}
+function renderDash(){
+  const r = periodRange(state.dashPeriod), { ts, st } = rangeStats(r);
+  setHead('Статистика', r.label);
+  const year = todayISO().slice(0, 4);
+  let h = `<div class="seg">${[['week','Неделя'],['month','Месяц'],['year','Год']].map(([k, l]) =>
+    `<button data-act="period" data-p="${k}" class="${k === state.dashPeriod ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  h += signBlock(st, 'Вам чистыми ' + r.word);
+  h += coCard(st, r);
+
+  const cw = curWeek(), wks = []; for (let k = 11; k >= 0; k--) wks.push(addDays(cw, -7 * k));
+  const wst = wks.map(w => weekStats(w));
+  const custs = groupBy(ts, 'customer', 'totalRate').slice(0, 6);
+  if (window.Chart) {
+    h += `<div class="card chart-card"><h3>Чистыми по неделям</h3><p class="hint">Последние 12 недель</p><div class="chart"><canvas id="c1"></canvas></div></div>
+      <div class="card chart-card"><h3>Заработок и чистыми по месяцам</h3><p class="hint">${year} год</p><div class="chart"><canvas id="c2"></canvas></div></div>
+      <div class="card chart-card"><h3>Топливо по неделям</h3><p class="hint">Сумма заправок, $</p><div class="chart"><canvas id="c3"></canvas></div></div>
+      <div class="card chart-card"><h3>Заказчики</h3><p class="hint">Сумма ставок ${r.word}, основной груз</p>
+        ${custs.length ? `<div class="chart" style="height:${40 + custs.length * 40}px"><canvas id="c4"></canvas></div>` : '<p class="hint" style="margin:12px 0 0">Нет рейсов за этот период</p>'}</div>`;
+  } else h += '<p class="hint">Графики не загрузились. Проверьте интернет и откройте приложение заново.</p>';
+
+  const weeksWithData = [...new Set(state.trips.map(t => t.week).concat(state.fuel.map(f => f.week)))].sort().reverse();
+  if (weeksWithData.length) {
+    const ws = weeksWithData.map(w => [w, weekStats(w)]);
+    const max = Math.max(1, ...ws.map(x => Math.abs(x[1].net)));
+    h += `<h2 class="sec"><span>Все недели</span><small>нажмите, чтобы открыть</small></h2><div class="card" style="padding:2px 14px">${ws.map(([w, s]) =>
+      `<div class="wkrow" role="button" tabindex="0" data-act="open-week" data-week="${w}">
+        <b>${weekLabel(w)}</b><span class="r ${s.net < 0 ? 'neg' : ''}">${money(s.net)}</span>
+        <small>${s.n} ${plural(s.n, TRIPS_WORD)}${s.coTrips ? `, ${s.coTrips} с догрузом` : ''}, ${num(s.total)} миль</small><small style="text-align:right">топливо ${money(s.fuelAmt)}</small>
+        <div class="meter"><i class="${s.net < 0 ? 'neg' : ''}" style="width:${Math.round(Math.abs(s.net) / max * 100)}%"></i></div>
+      </div>`).join('')}</div>`;
+  }
+  main.innerHTML = h;
+  if (!window.Chart) return;
+
+  const pos = cssVar('--pos'), neg = cssVar('--neg'), rev = cssVar('--rev'), fuel = cssVar('--fuel-bar');
+  Chart.defaults.color = cssVar('--muted');
+  Chart.defaults.borderColor = cssVar('--line');
+  Chart.defaults.font.family = cssVar('--font');
+  Chart.defaults.font.size = 12;
+  const base = (horiz, fmt) => ({
+    responsive: true, maintainAspectRatio: false, indexAxis: horiz ? 'y' : 'x',
+    plugins: { legend: { display: false }, tooltip: { displayColors: false, callbacks: { label: c => (c.dataset.label ? c.dataset.label + ': ' : '') + (fmt || money)(horiz ? c.parsed.x : c.parsed.y) } } },
+    scales: horiz ? { x: { ticks: { callback: moneyShort, maxTicksLimit: 5 }, border: { display: false } }, y: { grid: { display: false }, border: { display: false } } }
+                  : { y: { ticks: { callback: moneyShort, maxTicksLimit: 5 }, border: { display: false } }, x: { grid: { display: false }, border: { display: false } } }
+  });
+  const mk = (id, cfg) => { const el = document.getElementById(id); if (el) charts.push(new Chart(el, cfg)); };
+  const bar = { borderRadius: 5, borderSkipped: false, maxBarThickness: 28 };
+  const wLabels = wks.map(w => { const d = parseISO(w); return d.getUTCDate() + ' ' + MS[d.getUTCMonth()]; });
+
+  mk('c1', { type: 'bar', options: base(false), data: { labels: wLabels,
+    datasets: [Object.assign({ data: wst.map(s => s.net), backgroundColor: wst.map(s => s.net < 0 ? neg : pos) }, bar)] } });
+
+  const months = []; for (let m = 1; m <= +todayISO().slice(5, 7); m++) months.push(m);
+  const ms = months.map(m => rangeStats({ start: `${year}-${pad(m)}-01`, end: toISO(new Date(Date.UTC(+year, m, 0))) }).st);
+  const o2 = base(false); o2.plugins.legend = { display: true, position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, useBorderRadius: true, borderRadius: 3 } };
+  o2.plugins.tooltip.displayColors = true;
+  mk('c2', { type: 'bar', options: o2, data: { labels: months.map(m => MS[m-1]),
+    datasets: [Object.assign({ label: 'Заработок', data: ms.map(s => s.gross), backgroundColor: rev }, bar),
+               Object.assign({ label: 'Чистыми', data: ms.map(s => s.net), backgroundColor: ms.map(s => s.net < 0 ? neg : pos) }, bar)] } });
+
+  mk('c3', { type: 'bar', options: base(false, money2), data: { labels: wLabels,
+    datasets: [Object.assign({ data: wst.map(s => round2(s.fuelAmt)), backgroundColor: fuel }, bar)] } });
+
+  mk('c4', { type: 'bar', options: base(true), data: { labels: custs.map(x => x[0]),
+    datasets: [Object.assign({ data: custs.map(x => x[1]), backgroundColor: rev }, bar)] } });
+}
+function groupBy(ts, key, val){
+  const m = {}; ts.forEach(t => { const k = t[key] || 'Без названия'; m[k] = (m[k] || 0) + (+t[val] || 0); });
+  return Object.entries(m).sort((a, b) => b[1] - a[1]);
+}
+
+/* ---------- действия ---------- */
+async function mutate(action, payload, okMsg){
+  const d = await api(action, payload);
+  setData(d); toast(okMsg); haptic('success');
+}
+function setData(d){
+  state.profile = d.profile ? normProfile(d.profile) : null;
+  state.trips = (d.trips || []).map(t => {
+    t.extras = (t.extras || []).map(x => Object.assign(prepExtra(x), { id: x.id }));
+    const ex = extrasSum(t), m = +t.miles || 0, dh = +t.deadhead || 0, r = +t.rate || 0;
+    const loaded = m + ex.miles, total = loaded + dh, totalRate = r + ex.rate;
+    return Object.assign(t, { miles: m, deadhead: dh, rate: r, tolls: +t.tolls || 0, other: +t.other || 0,
+      pay: +t.pay || 0, earn: +t.earn || 0, coEarn: +t.coEarn || 0,
+      extrasCount: ex.n, extrasRate: round2(ex.rate), totalRate: round2(totalRate), extraMiles: ex.miles,
+      stopPay: round2(ex.stop), lumper: round2(ex.lumper),
+      totalMiles: total, rpm: loaded ? round2(totalRate / loaded) : 0, rpmTotal: total ? round2(totalRate / total) : 0 });
+  });
+  state.fuel = (d.fuel || []).map(f => Object.assign(f, { amount: +f.amount || 0, gallons: +f.gallons || 0,
+    ppg: +f.gallons ? round3(+f.amount / +f.gallons) : 0 }));
+}
+function busy(btn, text){ btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = text; }
+function unbusy(btn){ btn.disabled = false; btn.textContent = btn.dataset.label; }
+function saveDraft(){
+  if (state.view === 'add' && !state.editId) state.draft = readForm();
+  if (state.view === 'fuelform' && !state.editFuelId) state.fuelDraft = readFuelForm();
+}
+function formObj(){ return state.view === 'profile' ? state.pf : state.ob; }
+
+main.addEventListener('click', async e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const act = el.dataset.act;
+  if (act === 'add-fuel' || act === 'edit-fuel' || act === 'edit-trip') e.stopPropagation();
+  try {
+    if (act === 'retry') { state.loaded = false; render(); load(); }
+    else if (act === 'go') { state.editId = null; go(el.dataset.view); }
+    else if (act === 'period') { tap(); state.dashPeriod = el.dataset.p; render(); }
+    else if (act === 'wk-prev') { tap(); state.week = addDays(state.week, -7); render(); }
+    else if (act === 'wk-next') { tap(); state.week = addDays(state.week, 7); render(); }
+    else if (act === 'wk-today') { tap(); state.week = curWeek(); render(); }
+    else if (act === 'open-week') { state.week = el.dataset.week; go('week'); }
+    else if (act === 'set-date') {
+      document.getElementById(el.dataset.target).value = addDays(todayISO(), +el.dataset.d);
+      tap(); updatePills(); saveDraft();
+    }
+    else if (act === 'swap') {
+      const a = document.getElementById('f_from'), b = document.getElementById('f_to');
+      [a.value, b.value] = [b.value, a.value]; tap(); saveDraft();
+    }
+    /* догрузы */
+    else if (act === 'add-extra') {
+      const f = readForm(); f.extras.push({}); state.form = f; saveDraft(); tap(); render();
+      const blocks = document.querySelectorAll('#extras .extra'), lastB = blocks[blocks.length - 1];
+      if (lastB) { lastB.scrollIntoView({ block: 'center', behavior: 'smooth' }); const i = lastB.querySelector('input'); if (i) i.focus({ preventScroll: true }); }
+    }
+    else if (act === 'del-extra') {
+      const f = readForm(); f.extras.splice(+el.dataset.i, 1); state.form = f; tap(); render(); saveDraft();
+    }
+    /* онбординг и профиль */
+    else if (act === 'pick-pay') {
+      const o = formObj(); tap();
+      if (o.payType !== el.dataset.v) { o.payType = el.dataset.v; if (state.view !== 'profile') o.paysFuel = o.payType === 'owner'; }
+      render();
+    }
+    else if (act === 'pick-co') { const o = formObj(); tap(); o.coPay = el.dataset.v; render(); }
+    else if (act === 'ob-next') {
+      const o = state.ob;
+      if (o.step === 0 && !String(o.name).trim()) { toast('Укажите имя', true); return; }
+      if (o.step === 2) { const err = validateProfile(o); if (err) { toast(err, true); return; } }
+      o.step++; tap(); render(); window.scrollTo(0, 0);
+    }
+    else if (act === 'ob-back') { state.ob.step--; tap(); render(); }
+    else if (act === 'finish-ob' || act === 'save-profile') {
+      const o = formObj(), err = validateProfile(o);
+      if (err) { toast(err, true); haptic('error'); return; }
+      busy(el, 'Сохранение…');
+      try { await mutate('saveProfile', normProfile(o), act === 'finish-ob' ? 'Профиль готов' : 'Профиль сохранён'); }
+      catch (x) { unbusy(el); throw x; }
+      state.ob = null; state.pf = null;
+      if (act === 'finish-ob') go('week'); else render();
+    }
+    /* рейсы */
+    else if (act === 'edit-trip') { state.editId = el.dataset.id; go('add'); }
+    else if (act === 'cancel-edit') { state.editId = null; go('week'); }
+    else if (act === 'clear-draft') { state.draft = null; go('add'); }
+    else if (act === 'save-trip') {
+      const t = prepTrip(readForm(), prof()); if (state.editId) t.id = state.editId;
+      const err = validate(t); if (err) { toast(err, true); haptic('error'); return; }
+      busy(el, 'Сохранение…');
+      try { await mutate('saveTrip', t, state.editId ? 'Изменения сохранены' : 'Рейс сохранён'); }
+      catch (x) { unbusy(el); throw x; }
+      state.editId = null; state.draft = null; state.week = t.week; go('week');
+    }
+    else if (act === 'delete-trip') {
+      if (!(await ask('Удалить этот рейс вместе с догрузами?'))) return;
+      busy(el, 'Удаление…');
+      try { await mutate('deleteTrip', { id: state.editId }, 'Рейс удалён'); } catch (x) { unbusy(el); throw x; }
+      state.editId = null; go('week');
+    }
+    /* топливо */
+    else if (act === 'add-fuel') { state.editFuelId = null; go('fuelform'); }
+    else if (act === 'edit-fuel') { state.editFuelId = el.dataset.id; go('fuelform'); }
+    else if (act === 'cancel-fuel') { state.editFuelId = null; go('fuel'); }
+    else if (act === 'save-fuel') {
+      const f = prepFuel(readFuelForm()); if (state.editFuelId) f.id = state.editFuelId;
+      if (!ISO_RE.test(f.date)) { toast('Укажите дату', true); return; }
+      if (!(f.amount > 0)) { toast('Укажите сумму', true); haptic('error'); return; }
+      if (!(f.gallons > 0)) { toast('Укажите галлоны', true); haptic('error'); return; }
+      busy(el, 'Сохранение…');
+      try { await mutate('saveFuel', f, state.editFuelId ? 'Изменения сохранены' : 'Заправка сохранена'); }
+      catch (x) { unbusy(el); throw x; }
+      state.editFuelId = null; state.fuelDraft = null; state.week = f.week; go('fuel');
+    }
+    else if (act === 'delete-fuel') {
+      if (!(await ask('Удалить эту заправку?'))) return;
+      busy(el, 'Удаление…');
+      try { await mutate('deleteFuel', { id: state.editFuelId }, 'Заправка удалена'); } catch (x) { unbusy(el); throw x; }
+      state.editFuelId = null; go('fuel');
+    }
+    /* карта */
+    else if (act === 'geo') { tap(); useMyLocation(); }
+    else if (act === 'route-retry') { buildRoute(); }
+    else if (act === 'route-trip') {
+      const r = ROUTE.res, last = sortByDate(state.trips)[0]; if (!r) return;
+      state.editId = null;
+      state.draft = { date: todayISO(), from: cityLabel(ROUTE.pts.pick), to: cityLabel(ROUTE.pts.drop),
+        deadhead: Math.round(r.emptyMi) || '', miles: Math.round(r.loadedMi), truck: last ? last.truck : '', extras: [] };
+      go('add'); toast('Мили взяты из маршрута, осталось вписать ставку');
+    }
+    /* демо */
+    else if (act === 'seed') {
+      if (!(await ask('Заменить демо-данные примером за 6 недель?'))) return;
+      await mutate('seedDemo', {}, 'Пример загружен'); state.pf = null; go('week');
+    }
+    else if (act === 'reset') {
+      if (!(await ask('Удалить все демо-данные и профиль с этого устройства?'))) return;
+      await mutate('resetDemo', {}, 'Демо-данные очищены'); state.pf = null; state.ob = null; go('week');
+    }
+  } catch (x) { toast(x.message || String(x), true); haptic('error'); }
+});
+main.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"]')) { e.preventDefault(); e.target.click(); }
+});
+function onField(e){
+  const el = e.target;
+  if (el.dataset && el.dataset.zip) { if (e.type === 'input') onZip(el); return; }
+  if (el.dataset && el.dataset.ppg) { ROUTE.ppg = parseNum(el.value); clearTimeout(onField.t); onField.t = setTimeout(updateRouteBoxKeepFocus, 400); return; }
+  if (el.dataset && el.dataset.field) {
+    const o = formObj(); if (!o) return;
+    o[el.dataset.field] = el.type === 'checkbox' ? el.checked : el.value;
+    return;
+  }
+  if (state.view === 'add' || state.view === 'fuelform') { updatePreview(); updatePills(); saveDraft(); }
+}
+function updateRouteBoxKeepFocus(){
+  const had = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.ppg;
+  const pos = had ? document.activeElement.selectionStart : null;
+  updateRouteBox();
+  if (had) { const i = document.querySelector('[data-ppg]'); if (i) { i.focus({ preventScroll: true }); try { i.setSelectionRange(pos, pos); } catch (x) {} } }
+}
+main.addEventListener('input', onField);
+main.addEventListener('change', onField);
+document.getElementById('tabs').addEventListener('click', e => {
+  const b = e.target.closest('.tab'); if (!b) return;
+  tap();
+  state.editId = null; state.editFuelId = null;
+  go(b.dataset.view);
+});
+document.getElementById('avatar').addEventListener('click', () => {
+  tap(); state.editId = null; state.editFuelId = null; state.pf = null; go('profile');
+});
+
+async function load(){
+  try { setData(await api('getAll')); state.error = null; }
+  catch (e) { state.error = e.message || 'Не удалось загрузить данные'; }
+  state.loaded = true; render();
+}
+
+state.week = curWeek();
+applyTheme();
+if (IN_TG) {
+  try {
+    tg.ready(); tg.expand();
+    if (tg.isVersionAtLeast('7.7')) tg.disableVerticalSwipes();
+    tg.BackButton.onClick(() => {
+      if (state.view === 'fuelform') { state.editFuelId = null; go('fuel'); }
+      else { state.editId = null; go('week'); }
+    });
+    tg.onEvent('themeChanged', () => { applyTheme(); render(); });
+  } catch (e) {}
+} else {
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { applyTheme(); render(); });
+}
+render();
+load();
+</script>
+</body>
+</html>
